@@ -262,8 +262,8 @@ use warnings;
             pathnames => 1,   information_files => 1, 
         };
 
-        $self->_load_parameters_file(catfile($path, $pkginst, 'pkginfo'));
-        $self->_load_pkgmap(catfile($path, $pkginst, 'pkgmap'));
+        $self->_load_parameters_file("$path/$pkginst/pkginfo"));
+        $self->_load_pkgmap("$path/$pkginst/pkgmap"));
 
         $self->{pkginfo}{PKGINST}       = $pkginst;
         $self->{pkginfo}{INST_DATADIR}  = $path;
