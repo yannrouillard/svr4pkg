@@ -241,8 +241,14 @@ use warnings;
     # Purpose:    Create a new instance of a Package object
     #             given a svr4 package in the file system format
     # Parameters: 
-    #   $path    - the path where the package is located
-    #   $pkginst - the svr4 name of the package
+    #   $path          - the path where the package is located
+    #   $pkginst       - the svr4 name of the package
+    #   $path_mappings - a set of path transformations to apply
+    #                    on the destination paths of file and in 
+    #                    the contents of the shell scripts.
+    #                    It's a hash where keys and values are 
+    #                    paths, each path key must be mapped
+    #                    to the path value.
     #
     sub new
     {
@@ -306,12 +312,13 @@ use warnings;
 
 
     #
-    # Purpose:    Create or install the package files of the given type
-    #             on the server at the given location
+    # Purpose:       Install the files of the package on the target location
+    #                using a standard copy/link/symlink operation, depending
+    #                on the file type.
     # Parameters: 
-    #   $dest       - the root directory where files must be installed
-    #   $file_types - the type of files that must be installed under the
-    #                 form of a string of file types letters.
+    #   $pkgmap_entry - the list of pkgmap entries whose corresponding files
+    #                   must be installed on the target file system.
+    #   $dest         - the root directory where files must be installed
     #
     sub _install_files_by_copy {
 
@@ -348,9 +355,11 @@ use warnings;
     }
 
     #
-    # Purpose:    Blabla
+    # Purpose:     Install the package information files (pkginfo, pkgmap
+    #              installation scripts...) at the given location.
     #             
     # Parameters: 
+    #   $dest         - the root directory where files must be installed
     #
     sub install_information_files
     {
@@ -363,11 +372,12 @@ use warnings;
 
     #
     # Purpose:    Create or install the package files of the given type
-    #             on the server at the given location
+    #             on the server at the given location, running the corresponding
+    #             class action scripts if required.
     # Parameters: 
-    #   $dest       - the root directory where files must be installed
-    #   $file_types - the type of files that must be installed under the
-    #                 form of a string of file types letters.
+    #   $dest                    - the root directory where files must be installed
+    #   $action_scripts_location - an optional directory where class action scripts
+    #                              must be looked for.
     #
     sub install_files
     {
@@ -556,10 +566,15 @@ use warnings;
 
 
     #
-    # Purpose:     Blabla
-    #
+    # Purpose:       Install the files of the package on the target location
+    #                using a standard copy/link/symlink operation, depending
+    #                on the file type.
     # Parameters: 
-    #   $file       - the path of the parameters file to load
+    #   $pkgmap_entry  - the list of pkgmap entries whose corresponding files
+    #                    must be installed on the target file system.
+    #   $dest          - the root directory where files must be installed
+    #   $action_script - path of the action script that will take care of
+    #                    installating the pkgmap entries
     #
     sub _install_files_by_action_script {
         my ($self, $pkgmap_entries, $dest, $action_script) = @_;
@@ -570,6 +585,8 @@ use warnings;
         open(my $fh, "| $action_script");
 
         foreach my $pkgmap_entry (@$pkgmap_entries) {
+            # An action class script takes as input of list of files
+            # to install 
             my $src_path  = $self->_build_path($pkgmap_entry);
             my $dest_path = $self->_build_path($pkgmap_entry, $dest);
             print $fh "$src_path $dest_path\n";
@@ -579,10 +596,17 @@ use warnings;
     }
 			
     #
-    # Purpose:     Blabla
+    # Purpose:     Check of the given script is available whereas
+    #              in the package itself or on the system (for class
+    #              action scripts).
+    #              It returns the full path to the scripts or undef
+    #              if not script is found.
     #
     # Parameters: 
-    #   $file       - the path of the parameters file to load
+    #   $script             - the name of the script to check for
+    #   $alternate_location - an alternate path where scripts must be
+    #                         searched if they are not provided in
+    #                         the package
     #
     sub check_installation_script {
         my ($self, $script, $alternate_location) = @_;
@@ -601,7 +625,15 @@ use warnings;
     }
 
     #
-    # Purpose:    Blabla
+    # Purpose:       Parses the content of the given scripts 
+    #                and replaces any path found 
+    #                It returns a path to a script which don't
+    #                contains any unmapped path.
+    #                It can be a temporary new script if modifications
+    #                were applied.
+    #
+    # Parameters: 
+    #   $script - the name of the script 
     # 
     sub _relocate_path_in_script {
         my ($self, $script) = @_;
@@ -609,6 +641,8 @@ use warnings;
         my @mapped_paths = keys(%{$self->{path_mappings}});
         return ($script) if (not @mapped_paths);
 
+        # Our temporary patched script will automatically
+        # be deleted when it is no longer referenced
         my $patched_script = File::Temp->new(UNLINK => 1);
         chmod (0700, $patched_script);
 
@@ -625,6 +659,7 @@ use warnings;
 
         return ($patched_script);
     }
+
 
     ########################################################################
     # Purpose:   The Package::Manager class is responsable for providing 
@@ -738,11 +773,15 @@ use warnings;
     }
 
     #
-    # Purpose:    Register the package in the package database and
-    #             package content database.
+    # Purpose:    Register the given file in the package content 
+    #             database (usually the /var/sadm/install/contents file)
     #
     # Parameters: 
-    #   $package - the package that must be registered
+    #   $pkgmap_entry - the pkgmap entry that must be registered
+    #   $pkginst      - the pkginst which owns this entry
+    #   $start        - an optional index in the contents array.
+    #                   The method will look where to add the 
+    #                   new entry after this location.
     # 
     sub register_file
     {
@@ -806,6 +845,8 @@ use warnings;
         my ($self, $package, $dest) = @_;
 
         if (defined($self->{binaries_location})) {
+            # We make sure the location of the svr4pkg tools are
+            # in the paths so they are found by installation scripts
             $ENV{PATH} = $self->{binaries_location} . ':' . $ENV{PATH};
         }
 
@@ -984,6 +1025,7 @@ sub installf_cmd {
         my $line = join(' ', (1, $ftype, $class, $pathname, @ARGV[3..$#ARGV]));
 
         if ($ftype =~ /[evf]/) {
+            # we add the required size, cksum, modtime information
             my $cksum = `/usr/bin/sum $pathname`;
             $cksum = (split(/\s+/, $cksum, 2))[0];
             my ($size, $modtime) = (stat($pathname))[7, 9];
