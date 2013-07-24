@@ -310,46 +310,32 @@ use warnings;
 
 
     #
-    # Purpose:       Install the files of the package on the target location
-    #                using a standard copy/link/symlink operation, depending
-    #                on the file type.
-    # Parameters: 
-    #   $pkgmap_entry - the list of pkgmap entries whose corresponding files
-    #                   must be installed on the target file system.
-    #   $dest         - the root directory where files must be installed
+    # Purpose:     Check of the given script is available whereas
+    #              in the package itself or on the system (for class
+    #              action scripts).
+    #              It returns the full path to the scripts or undef
+    #              if not script is found.
     #
-    sub _install_files_by_copy {
+    # Parameters: 
+    #   $script             - the name of the script to check for
+    #   $alternate_location - an alternate path where scripts must be
+    #                         searched if they are not provided in
+    #                         the package
+    #
+    sub check_installation_script {
+        my ($self, $script, $alternate_location) = @_;
 
-        my ($self, $pkgmap_entries, $dest) = @_;
-
-        # we make sure the files are first created with restrictive access 
-        my $original_umask = umask(700);
-
-        foreach my $pkgmap_entry (@$pkgmap_entries) {
-            my $dest_path= $self->_build_path($pkgmap_entry, $dest);
-
-            make_path(dirname($dest_path));
-
-            if ($pkgmap_entry->is_symlink()) {
-                symlink($pkgmap_entry->{targetname}, $dest_path);
-
-            } elsif ($pkgmap_entry->is_hardlink()) {
-                link($pkgmap_entry->{targetname}, $dest_path);
-
-            } elsif ($pkgmap_entry->is_regular_file() 
-                    or $pkgmap_entry->is_information_file()) { 
-
-                my $src_path = $self->_build_path($pkgmap_entry);
-                copy($src_path, $dest_path);
-
-            } elsif ($pkgmap_entry->is_directory()) {
-                mkdir($dest_path);
-            }
-
-            $pkgmap_entry->apply_permissions_and_ownerships($dest_path);
+        if (exists($self->{installation_scripts}{$script})) {
+            my $pkgmap_entry = $self->{installation_scripts}{$script};
+            return ($self->_build_path($pkgmap_entry));
         }
-        # we restore the previous umask;
-        umask($original_umask);
+
+        if (defined($alternate_location)) {
+            my $filename = "$alternate_location/$script";
+            return ($filename) if ( -f $filename );
+        }
+
+        return;
     }
 
     #
@@ -568,6 +554,50 @@ use warnings;
     #                using a standard copy/link/symlink operation, depending
     #                on the file type.
     # Parameters: 
+    #   $pkgmap_entry - the list of pkgmap entries whose corresponding files
+    #                   must be installed on the target file system.
+    #   $dest         - the root directory where files must be installed
+    #
+    sub _install_files_by_copy {
+
+        my ($self, $pkgmap_entries, $dest) = @_;
+
+        # we make sure the files are first created with restrictive access 
+        my $original_umask = umask(700);
+
+        foreach my $pkgmap_entry (@$pkgmap_entries) {
+            my $dest_path= $self->_build_path($pkgmap_entry, $dest);
+
+            make_path(dirname($dest_path));
+
+            if ($pkgmap_entry->is_symlink()) {
+                symlink($pkgmap_entry->{targetname}, $dest_path);
+
+            } elsif ($pkgmap_entry->is_hardlink()) {
+                link($pkgmap_entry->{targetname}, $dest_path);
+
+            } elsif ($pkgmap_entry->is_regular_file() 
+                    or $pkgmap_entry->is_information_file()) { 
+
+                my $src_path = $self->_build_path($pkgmap_entry);
+                copy($src_path, $dest_path);
+
+            } elsif ($pkgmap_entry->is_directory()) {
+                mkdir($dest_path);
+            }
+
+            $pkgmap_entry->apply_permissions_and_ownerships($dest_path);
+        }
+        # we restore the previous umask;
+        umask($original_umask);
+    }
+    
+
+    #
+    # Purpose:       Install the files of the package on the target location
+    #                using a standard copy/link/symlink operation, depending
+    #                on the file type.
+    # Parameters: 
     #   $pkgmap_entry  - the list of pkgmap entries whose corresponding files
     #                    must be installed on the target file system.
     #   $dest          - the root directory where files must be installed
@@ -593,34 +623,6 @@ use warnings;
         close ($fh);
     }
 			
-    #
-    # Purpose:     Check of the given script is available whereas
-    #              in the package itself or on the system (for class
-    #              action scripts).
-    #              It returns the full path to the scripts or undef
-    #              if not script is found.
-    #
-    # Parameters: 
-    #   $script             - the name of the script to check for
-    #   $alternate_location - an alternate path where scripts must be
-    #                         searched if they are not provided in
-    #                         the package
-    #
-    sub check_installation_script {
-        my ($self, $script, $alternate_location) = @_;
-
-        if (exists($self->{installation_scripts}{$script})) {
-            my $pkgmap_entry = $self->{installation_scripts}{$script};
-            return ($self->_build_path($pkgmap_entry));
-        }
-
-        if (defined($alternate_location)) {
-            my $filename = "$alternate_location/$script";
-            return ($filename) if ( -f $filename );
-        }
-
-        return;
-    }
 
     #
     # Purpose:       Parses the content of the given scripts 
