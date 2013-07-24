@@ -97,8 +97,6 @@ use warnings;
             $self->{filename} = $self->{pathname};
         }
 
-        $self->{original_filename} = $self->{filename};
-
         return (bless($self, $class));
     }
 
