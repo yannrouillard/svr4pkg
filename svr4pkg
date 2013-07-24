@@ -42,9 +42,10 @@ use warnings;
         'cmp'   => \&cmp,
     );
 
-    my @valid_pkgmap_fields = qw(
+    my @pkgmap_entry_fields = qw(
         part  ftype  class  pathname  major  minor
         mode  owner  group  size      cksum  modtime
+        filename     targetname
     );
 
     my %pkgmap_fields_for = (
@@ -72,7 +73,7 @@ use warnings;
         my ($class, $pkgmap_line) = @_ or die;
         my $self = bless({}, $class);
 
-        foreach my $field (@valid_pkgmap_fields) { 
+        foreach my $field (@pkgmap_entry_fields) {
             $self->{$field} = undef;
         }
         
@@ -94,7 +95,6 @@ use warnings;
             ($self->{filename}, $self->{targetname}) = split(/=/, $self->{pathname}, 2);
         } else {
             $self->{filename} = $self->{pathname};
-            $self->{targetname} = undef;
         }
 
         $self->{original_filename} = $self->{filename};
