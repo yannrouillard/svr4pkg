@@ -29,37 +29,91 @@ use warnings;
     # Purpose:    The Package::Entry class is responsable for providing
     #             information to a file contained in a package and in the 
     #             pkgmap file
-    #             It also useful methods to audit and apply file attributes.
+    #             It also useful methods to audit and apply file fields.
     #
     ########################################################################
     package Package::Entry;
 
     use List::Util qw(first);
     use File::Spec::Functions qw(file_name_is_absolute);
+    use File::stat;
+    use Fcntl ':mode';
     use POSIX qw(ceil);
 
     use overload (
         'cmp'   => \&cmp,
     );
 
-    my @pkgmap_entry_fields = qw(
+    # List of fields of the package entry object
+    my @package_entry_fields = qw(
         part  ftype  class  pathname  major  minor
         mode  owner  group  size      cksum  modtime
         filename     targetname
     );
 
-    my %pkgmap_fields_for = (
-        qr/d/       => [ qw(part ftype class pathname mode owner group) ],
-        qr/[sl]/    => [ qw(part ftype class pathname) ],
-        qr/[fve]/   => [ qw(part ftype class pathname mode owner group size cksum modtime) ],
-        qr/i/       => [ qw(part ftype pathname size cksum modtime) ],
-        qr/[bc]/    => [ qw(part ftype class pathname major minor owner group) ]
+    # These value of fields are used we check than
+    # that a local file is consistent with a package
+    # entry
+    my @compliance_fields = qw(
+        ftype major minor mode owner
+        group size  cksum modtime
     );
 
-    my @allowed_scripts = qw/request checkinstall preinstall postinstall premove postremove/;
+    # Mapping between the file type and the format of the line
+    # for that file type, both for a pkgmap file and the
+    # /var/sadm/install/contents file
+    # Between the two, the only difference is that in the latter 
+    # the pathname field is first and the part field is absent.
+    my %line_format_for = (
+        'pkgmap' => {
+            'd' => [ qw(part ftype class pathname mode owner group) ],
+            'x' => [ qw(part ftype class pathname mode owner group) ],
+            's' => [ qw(part ftype class pathname) ],
+            'l' => [ qw(part ftype class pathname) ],
+            'f' => [ qw(part ftype class pathname mode owner group size cksum modtime) ],
+            'v' => [ qw(part ftype class pathname mode owner group size cksum modtime) ],
+            'e' => [ qw(part ftype class pathname mode owner group size cksum modtime) ],
+            'p' => [ qw(part ftype class pathname mode owner group size cksum modtime) ],
+            'b' => [ qw(part ftype class pathname major minor owner group) ],
+            'c' => [ qw(part ftype class pathname major minor owner group) ],
+            'i' => [ qw(part ftype pathname size cksum modtime) ],
+        },
+        'contents' => {
+            'd' => [ qw(pathname ftype class mode owner group) ],
+            'x' => [ qw(pathname ftype class mode owner group) ],
+            's' => [ qw(pathname ftype class) ],
+            'l' => [ qw(pathname ftype class) ],
+            'f' => [ qw(pathname ftype class mode owner group size cksum modtime) ],
+            'v' => [ qw(pathname ftype class mode owner group size cksum modtime) ],
+            'e' => [ qw(pathname ftype class mode owner group size cksum modtime) ],
+            'p' => [ qw(pathname ftype class mode owner group size cksum modtime) ],
+            'b' => [ qw(pathname ftype class major minor owner group) ],
+            'c' => [ qw(pathname ftype class major minor owner group) ],
+            # No information files in the /var/sadm/install/contents file
+        },
+    );
+
+    # Mapping between the file type and the format of the pkgmap line
+    # The only difference between the pkgmap line format and the
+    # /var/sadm/install/contents line format is that in the latter
+    # the pathname attr is first and the part attr is absent
+
+    my %allowed_scripts = map { $_ => 1 } qw/ request    checkinstall
+                                              preinstall postinstall
+                                              premove    postremove   /;
+
+    # Mapping between the system file type (as returned by stat) 
+    # and the pkgmap file type
+    my %pkgmap_ftype_for = (
+        Fcntl::S_IFREG => 'f',
+        Fcntl::S_IFBLK => 'b',
+        Fcntl::S_IFCHR => 'c',
+        Fcntl::S_IFDIR => 'd',
+        Fcntl::S_IFLNK => 's',
+        Fcntl::S_IFIFO => 'p',
+    );
 
     use constant BLOCK_SIZE => 512;
-
 
     ## Public methods
 
@@ -68,28 +122,20 @@ use warnings;
     #             line in a pkgmap file
     # Parameters: 
     #   $pkgmap_line - a string containing a line of a pkgmap file
+    #   $ftype       -
+    #   $fields      - 
     #
     sub new {
-        my ($class, $pkgmap_line) = @_ or die;
-        my $self = bless({}, $class);
+        my ($class, $ftype, $fields) = @_ or die;
+        my $self = {};
 
-        foreach my $field (@pkgmap_entry_fields) {
-            $self->{$field} = undef;
+        my %pkgmap_fields = map { $_ => 1 } @{$line_format_for{'pkgmap'}{$ftype}};
+        foreach my $field (@package_entry_fields) {
+            $self->{$field} = (not exists($pkgmap_fields{$field})) ? undef
+                            :            exists($fields->{$field}) ? $fields->{$field}
+                            :                                         undef;
         }
-        
-        my @pkgmap_values = split(/\s+/, $pkgmap_line);
-        # the fields present are in a pkgmap line differ depending on the
-        # file type, so we get the associated line template and initialize 
-        # the attributes accordingly
-        foreach my $file_type_re (keys(%pkgmap_fields_for)) {
-            if ($pkgmap_values[1] =~ $file_type_re) {
-                my $pkgmap_field_at = $pkgmap_fields_for{$file_type_re};
-                foreach my $index (0..$#$pkgmap_field_at) {
-                    $self->{$pkgmap_field_at->[$index]} = $pkgmap_values[$index];
-                }
-                last;
-            }
-        }
+        bless($self, $class);
 
         if ($self->is_symlink() or $self->is_hardlink()) {
             ($self->{filename}, $self->{targetname}) = split(/=/, $self->{pathname}, 2);
@@ -97,7 +143,66 @@ use warnings;
             $self->{filename} = $self->{pathname};
         }
 
-        return (bless($self, $class));
+        return ($self);
+    }
+
+
+    #
+    # Purpose:    Creates and returns a pkgmap_entry object from a valid
+    #             line in a pkgmap file
+    # Parameters: 
+    #   $line   - a string containing a line describing the file and
+    #             its properties
+    #   $format - the format of the line which can be either:
+    #       pkgmap: for a line of a pkgmap file
+    #       contents: for a line of the /var/sadm/install/contents file
+    #
+    sub new_from_line {
+        my ($class, $pkgmap_line, $format) = @_ or die;
+        my %fields;
+
+        my @pkgmap_values = split(/\s+/, $pkgmap_line);
+        my $ftype = $pkgmap_values[1];
+        # the list of attributes presents in a line differ depending
+        # on the file type, so we get the associated line template and
+        # initialize the attributes accordingly
+        my $field_name_at = $line_format_for{$format}{$ftype};
+        foreach my $index (0..$#$field_name_at) {
+            $fields{$field_name_at->[$index]} = $pkgmap_values[$index];
+        }
+        
+        return (new($class, $ftype, \%fields));
+    }
+
+
+    #
+    # Purpose:    Creates and returns a pkgmap_entry object from a valid
+    #             line in a pkgmap file
+    # Parameters: 
+    #   $pkgmap_line - a string containing a line of a pkgmap file
+    #
+    sub new_from_file {
+        my ($class, $filename, $fields) = @_;
+        my %file_fields;
+
+        my $stats = lstat($filename);
+        $file_fields{part}     = 1;
+        $file_fields{ftype}    = $pkgmap_ftype_for{S_IFMT($stats->mode())};
+        $file_fields{pathname} = $filename;
+        $file_fields{class}    = 'none';
+        $file_fields{size}     = $stats->size();
+        $file_fields{owner}    = getpwuid($stats->uid());
+        $file_fields{group}    = getgrgid($stats->gid());
+        $file_fields{modtime}  = $stats->mtime();
+        $file_fields{mode}     = sprintf('%.4o', S_IMODE($stats->mode()));
+        $file_fields{minor}    = $stats->rdev() % 256;        
+        $file_fields{major}    = int($stats->rdev() / 256);
+        if ($file_fields{ftype} =~ /[fev]/) {
+            $file_fields{cksum}    = (split(/\s+/, `/usr/bin/sum $filename`, 2))[0];
+        }
+
+        $file_fields{keys(%$fields)} = values(%$fields);
+        return (new($class, $file_fields{ftype}, \%file_fields));
     }
 
 
@@ -114,7 +219,7 @@ use warnings;
     sub is_hardlink              { my $self = shift; return ($self->{ftype} eq 'l'); }
     sub is_relative              { my $self = shift; return (not file_name_is_absolute($self->{pathname})); }
     sub is_installation_script   { my $self = shift; return ($self->{ftype} eq 'i'
-                                                             and (first { $self->{pathname} eq $_ } @allowed_scripts
+                                                             and ($allowed_scripts{$self->{pathname}} 
                                                                   or $self->{pathname} =~ m/[ir]\..*/)); }
 
     #
@@ -148,7 +253,7 @@ use warnings;
     #   @pkginsts - the list of SVR4 package names that own this entry
     #               they will be listed at the end of the line.
     #
-    sub get_contents_line {
+    sub as_contents_line {
         my $self     = shift;
         my @pkginsts = @_;
         my @contents_line_fields;
@@ -156,33 +261,20 @@ use warnings;
         # information files are not stored in the contents file
         return if ($self->is_information_file());
 
-        # For each file type, the /var/sadm/install/contents line fields
-        # can be guessed from the pkgmap fields, so we first get the pkgmap
-        # line fields list for the file type of the current pkgmap entry
-        foreach my $file_type_re (keys(%pkgmap_fields_for)) {
-            if ($self->{ftype} =~ $file_type_re) {
-                @contents_line_fields = @{$pkgmap_fields_for{$file_type_re}};
-                last;
-            }
-        }
-        # The only difference is that, in the /var/sadm/install/contents line,
-        # the pathname field is first and the part field is absent
-        $contents_line_fields[0] = 'pathname';
-        splice(@contents_line_fields, 3, 1);
-
-        return join(' ', (map ({ $self->{$_} } @contents_line_fields), @pkginsts));
+        my $contents_line_fields = $line_format_for{'contents'}{$self->{ftype}};
+        return join(' ', (map ({ $self->{$_} } @$contents_line_fields), @pkginsts));
     }
 
 
     #
     # Purpose:    Modify the permissions, owner and group of the file, 
     #             directory, pipe... at the given path so it matches 
-    #             the attributes defined in the current pkgmap entry
+    #             the values defined in the current pkgmap entry
     # Parameters: 
     #   $path - the path of the file, directory, pipe... whose 
     #           permissions and ownership will be changed.
     #
-    sub apply_permissions_and_ownerships {
+    sub apply_pkgmap_properties {
         my ($self, $path) = @_;
 
         if (defined($self->{owner}) and defined($self->{group})) {
@@ -202,6 +294,48 @@ use warnings;
     }
 
 
+    #
+    # Purpose:    Checks that the properties of the file at the given
+    #             path match the informations stored in the pkgmap 
+    #             entry line. That includes size, cksum, owner, group, 
+    #             permissions.
+    #             It returns a list of non compliant fields.
+    #
+    # Parameters: 
+    #   $path - the path of the file whose fields will be checked
+    #
+    sub check_file_properties {
+        my ($self, $path) = @_;
+        my @non_compliant_fields;
+
+        my $pkgmap_entry = Package::Entry->new_from_file($path);
+
+
+
+        foreach my $field (@compliance_fields) {
+            next if (not defined($self->{$field}));
+
+            if ($field eq 'ftype' and $self->{ftype} =~ /[fvel]/
+                and $pkgmap_entry->{ftype} eq 'f') {
+                # A pkgmap entry of file type e, f, l or v just look like
+                # a regular file so we must consider that it's ok as long
+                # as the file installed is a regular file
+                next;
+            }
+
+            if ($self->{$field} ne $pkgmap_entry->{$field}) {
+                push (@non_compliant_fields, 
+                      { field    => $field,
+                        expected => $self->{$field},
+                        actual   => $pkgmap_entry->{$field} });
+                # if the file don't have the same type, there is 
+                # no need to compare the other fields
+                last if ($field eq 'ftype');
+            }
+        }
+
+        return (\@non_compliant_fields); 
+    }
 
     ########################################################################
     # Purpose:   The Package class is responsable for providing information
@@ -239,32 +373,50 @@ use warnings;
     # Purpose:    Create a new instance of a Package object
     #             given a svr4 package in the file system format
     # Parameters: 
-    #   $path          - the path where the package is located
-    #   $pkginst       - the svr4 name of the package
-    #   $path_mappings - a set of path transformations to apply
-    #                    on the destination paths of file and in 
-    #                    the contents of the shell scripts.
-    #                    It's a hash where keys and values are 
-    #                    paths, each path key must be mapped
-    #                    to the path value.
+    #   $path    - the path where the package is located
+    #   $pkginst - the svr4 name of the package
+    #   $options - a hash contains optional arguments:
+    #
+    #       package_entries - the list of pkgmap entries belonging
+    #                         to the package. It's useful when
+    #                         the package doesn't have a pkgmap file.
+    #
+    #       path_mappings   - a set of path transformations to apply
+    #                         on the destination paths of file and in 
+    #                         the contents of the shell scripts.
+    #                         It's a hash where keys and values are 
+    #                         paths, each path key must be mapped
+    #                         to the path value.
     #
     sub new
     {
-        my ($class, $path, $pkginst, $path_mappings) = @_ or die;
+        my ($class, $path, $pkginst, $options) = @_ or die;
         my $self = bless({}, $class);
 
+        $options = {} if (not defined ($options));
+        
         $self->{path}            = $path;
         $self->{pkginst}         = $pkginst;
-        $self->{path_mappings}   = $path_mappings;
         $self->{package_scripts} = {};
         $self->{statistics}      = {
             directories => 0, executables => 0,
             pathnames => 1,   information_files => 1, 
         };
 
-        $self->_load_parameters_file("$path/$pkginst/pkginfo"));
-        $self->_load_pkgmap("$path/$pkginst/pkgmap"));
+        $self->_load_parameters_file("$path/$pkginst/pkginfo");
 
+        # Handling optional arguments
+        $self->{path_mappings}
+            = exists($options->{path_mappings}) ? $options->{path_mappings} 
+            :                                     {};
+        $self->{pkgmap} 
+            = exists($options->{package_entries}) ? $options->{package_entries}
+            :                                       $self->_load_pkgmap();
+
+        $self->_update_package_info();
+
+        # Setup some basic informations that will be passed in
+        # the environment of each installation script
         $self->{pkginfo}{PKGINST}       = $pkginst;
         $self->{pkginfo}{INST_DATADIR}  = $path;
         $self->{pkginfo}{PKG_CLIENT_OS} = 'Solaris';
@@ -372,6 +524,7 @@ use warnings;
         @classes = ('none', grep { $_ ne 'none' } @classes);
 
         foreach my $class (@classes) {
+
             my @pkgmap_entries = grep { not $_->is_information_file() 
                 and $_->{class} eq $class } @{$self->{pkgmap}};
 
@@ -382,7 +535,42 @@ use warnings;
             } else {
                 $self->_install_files_by_copy(\@pkgmap_entries, $dest);
             }
+
+            foreach my $pkgmap_entry (@pkgmap_entries) {
+                $pkgmap_entry->apply_pkgmap_properties($self->_build_path($pkgmap_entry, $dest));
+            }
         }
+    }
+
+
+    #
+    # Purpose:    Check that the property of the files currently installed
+    #             match the ones specified in the package.
+    #             Returns the list of non compliant files and associated
+    #             errors.
+    #
+    # Parameters: 
+    #   $dest - the root directory where files have been installed
+    #           (defaut to '/' if not specified)
+    #
+    sub check_installed_files
+    {
+        my ($self, $dest) = @_;
+        my @inconsistent_files;
+        $dest = '/' if (not defined $dest);
+
+        foreach my $pkgmap_entry (@{$self->{pkgmap}}) {
+            my $filename = $self->_build_path($pkgmap_entry, $dest);
+            my $non_compliant_fields = $pkgmap_entry->check_file_properties($filename);
+
+            if (@{$non_compliant_fields}) {
+                push (@inconsistent_files,
+                      { package_entry => $pkgmap_entry,
+                        errors       => $non_compliant_fields });
+           }
+        }
+
+        return (\@inconsistent_files);
     }
 
 
@@ -509,24 +697,42 @@ use warnings;
     # Purpose:    Parse the pkgmap file located in the package and 
     #             initialize the list of package entries.
     #             At the end of this method, the 'pkgmap' internal
-    #             field is properly initialized as a list of 
+    #             attr is properly initialized as a list of 
     #             Package::Entry objects.
     #
     # Parameters: 
     #   $pkgmap_file - the path of the pkgmap file
     #
     sub _load_pkgmap {
-        my ($self, $pkgmap_file) = @_;
-        $self->{pkgmap} = [];
+        my $self = shift;
+        my @pkgmap;
+        my $pkgmap_file = catfile($self->{path}, $self->{pkginst}, "pkgmap");
 
         open (my $fh, '<', $pkgmap_file) or die;
         while (my $line = <$fh>) {
             next if ($line =~ /^:/);
             chomp($line);
 
-            my $pkgmap_entry = Package::Entry->new($line);
-            push (@{$self->{pkgmap}}, $pkgmap_entry); 
+            my $pkgmap_entry = Package::Entry->new_from_line($line, 'pkgmap');
+            push (@pkgmap, $pkgmap_entry); 
 
+        }
+        close ($fh);
+
+        return (\@pkgmap);
+    }
+
+    #
+    # Purpose:    Update various information about the current
+    #             package according to the list of files owned
+    #             by the package.
+    #             This includes the list of installation scripts
+    #             and the statistics about the files types and size.
+    #
+    sub _update_package_info {
+        my $self = shift;
+
+        foreach my $pkgmap_entry (@{$self->{pkgmap}}) {
             # We note what installation scripts are provided in the package
             if ($pkgmap_entry->is_installation_script()) {
                 $self->{installation_scripts}{$pkgmap_entry->{pathname}} = $pkgmap_entry;
@@ -539,13 +745,8 @@ use warnings;
             $self->{statistics}{executables}++       if ($pkgmap_entry->is_executable());
             $self->{statistics}{information_files}++ if ($pkgmap_entry->is_information_file());
             $self->{statistics}{blocks} += $pkgmap_entry->get_block_size();
-        }
-        close ($fh);
 
-        my $fake_line = '1 i pkgmap 0 0 0';
-        my $pkgmap_entry = Package::Entry->new($fake_line);
-        push (@{$self->{pkgmap}}, $pkgmap_entry); 
-		
+        }
     }
 
 
@@ -585,8 +786,6 @@ use warnings;
             } elsif ($pkgmap_entry->is_directory()) {
                 mkdir($dest_path);
             }
-
-            $pkgmap_entry->apply_permissions_and_ownerships($dest_path);
         }
         # we restore the previous umask;
         umask($original_umask);
@@ -700,11 +899,19 @@ use warnings;
         $self->{content_file}  = catfile($self->{admin_directory}, 'install/contents');
         $self->{path_mappings} = {};
 
+        # We will make sure any class actions scripts installed by a package
+        # is relocated to a different location. This is required to install
+        # shared installation scripts on systems where /usr is readonly
         if ($self->{relocate_class_script}) {
             my $path = NATIVE_ACTION_SCRIPTS_LOCATION;
             $self->{path_mappings}{$path} = $self->{action_scripts_location};
         }
 
+        # We will make sure that scripts will not contains any aboluste reference
+        # to the original location of native standard svr4 tools.
+        # This is required on systems where /usr is readonly to ensure that
+        # alternate tools provided by svr4pkg are used instead.
+        # All scripts will be modified before being executed.
         if ($self->{patch_pkg_location}) {
             my $path = '/usr/s?bin/(?=' . join('|', @relocatable_binaries) . ')';
             $self->{path_mappings}{$path} = '';
@@ -712,7 +919,6 @@ use warnings;
 
         return (bless($self, $class));
     }
-
 
     #
     # Purpose:    Create an instance of package manager using the
@@ -724,13 +930,24 @@ use warnings;
     # 
     sub get_package {
         my ($self, $device, $pkginst) = @_;
+        my $package_entries;
+        my $options = { path_mapping => $self->{path_mapping} };
 
         if ( -f $device ) {
+            # The package is in the datastream format
+            # we must first convert it to filesystem format
             $self->extract_package("$device");
             $device = $self->{spool_directory};
         } 
 
-        my $package = Package->new($device, $pkginst, $self->{path_mappings});
+        if ($device eq $self->{pkg_directory}) {
+            # The package is a local one, so it doesn't have a
+            # pkgmap file and the file information are stored in
+            # the /var/sadm/install/contents file
+            $options->{package_entries} = $self->list_installed_files($pkginst);
+        }
+
+        my $package = Package->new($device, $pkginst, $options);
         return ($package);
     }
 
@@ -761,7 +978,7 @@ use warnings;
     # Purpose:    Returns the list of svr4 package names that
     #             are installed on the system
     # 
-    sub get_installed_packages
+    sub list_installed_packages
     {
         my $self = shift;
 
@@ -771,6 +988,41 @@ use warnings;
 
         return (\@installed_pkgs);
     }
+
+
+    #
+    # Purpose:    Returns the list of files owned by a package
+    #             as a list of package::entry objects.
+    #
+    # Parameters: 
+    #   $pkginst - the svr4 name of an installed package
+    # 
+    sub list_installed_files
+    {
+        my ($self, $pkginst) = @_;
+        my @pkgmap_entries;
+
+        open (my $fh, '<', $self->{content_file});
+        while (my $line = <$fh>) {
+            chomp($line);
+            next if ($line =~ /^#/);
+
+            # We use a pragmatic test to check if the line describes a file
+            # that belongs to $pkginst, e.g. either:
+            # - the last field is $pkginst,
+            # - it's a shared directory entry and $pkginst is among the list
+            #   of packages which if after the 6 first fields
+            #
+            if ($line =~ /\b$pkginst\b|(?:S+ ){6}.*\b$pkginst\b/) {
+                my $package_entry = Package::Entry->new_from_line($line, 'contents');
+                push (@pkgmap_entries, $package_entry);
+            }
+        }
+        close ($fh);
+
+        return (\@pkgmap_entries);
+    }
+
 
     #
     # Purpose:    Register the given file in the package content 
@@ -824,7 +1076,7 @@ use warnings;
             }
         }
 
-        $contents[$idx] = $pkgmap_entry->get_contents_line(@pkginsts);
+        $contents[$idx] = $pkgmap_entry->as_contents_line(@pkginsts);
         untie(@contents);
 
         return ($idx);
@@ -865,6 +1117,7 @@ use warnings;
         $self->_verbose('## Executing postinstall script');
         $package->execute_procedure_script('postinstall');
     }
+
 
     ## Private methods
     
@@ -951,6 +1204,7 @@ use warnings;
 #############################################################################
 
 use Getopt::Long;
+use POSIX qw(strftime);
 use File::Basename qw(basename dirname);
 
 # Default configuration for the package manager
@@ -986,7 +1240,7 @@ sub info_cmd {
 
     my $package_manager = shift;
 
-    my $package_names = @ARGV ? \@ARGV : $package_manager->get_installed_packages();
+    my $package_names = @ARGV ? \@ARGV : $package_manager->list_installed_packages();
     foreach my $package_name (@$package_names) {
         my $package = $package_manager->get_package($device, $package_name);
         print ($package->get_info($display_long_info ? 'long' : 'short') . "\n");
@@ -1015,24 +1269,58 @@ sub param_cmd {
     }
 } 
 
+
+
+my %field_display_name = (
+    'ftype'   => 'file type',
+    'size'    => 'file size',
+    'modtime' => 'modtime',
+    'cksum'   => 'file cksum',
+    'group'   => 'group name',
+    'owner'   => 'owner name',
+    'mode'    => 'permissions',
+    'major'   => 'device major',
+    'minor'   => 'device minor',
+);
+
+sub chk_cmd {
+
+    my $package_manager = shift;
+
+    my $package_names = @ARGV ? \@ARGV : $package_manager->list_installed_packages();
+    foreach my $pkginst (@$package_names) {
+        my $package = $package_manager->get_package($device, $pkginst);
+        foreach my $entry_error (@{$package->check_installed_files('/')}) {
+            my $package_entry = $entry_error->{package_entry};
+            printf STDERR ("ERROR: %s\n", ($package_entry->{filename}));
+            foreach my $error (@{$entry_error->{errors}}) {
+                my ($field, $expected, $actual) = @{$error}{'field', 'expected', 'actual'};
+                if ($field eq 'modtime') {
+                    $expected = strftime('%D %r', localtime($expected));
+                    $actual   = strftime('%D %r', localtime($actual));
+                }
+                printf STDERR ("\t%s <%s> expected <%s> actual\n",
+                               ($field_display_name{$field}, $expected, $actual));
+            }
+        }
+    }
+} 
+
 sub installf_cmd {
 
     my $package_manager = shift;
 
     if (@ARGV > 1) {
         my ($pkginst, $pathname, $ftype) = @ARGV[0..2];
-        # we put an arbitray part number -> 1
-        my $line = join(' ', (1, $ftype, $class, $pathname, @ARGV[3..$#ARGV]));
+        my %fields;
 
-        if ($ftype =~ /[evf]/) {
-            # we add the required size, cksum, modtime information
-            my $cksum = `/usr/bin/sum $pathname`;
-            $cksum = (split(/\s+/, $cksum, 2))[0];
-            my ($size, $modtime) = (stat($pathname))[7, 9];
-            $line = join(' ', ($line, $size, $cksum, $modtime));
+        if (@ARGV > 6) {
+            $fields{'major', 'minor', 'mode', 'owner', 'group'} = @ARGV[3..7];
+        } elsif (@ARGV > 3) {
+            $fields{'mode', 'owner', 'group'} = @ARGV[3..5];
         }
 
-        my $pkgmap_entry = Package::Entry->new($line);
+        my $pkgmap_entry = Package::Entry->new_from_file ($pathname, \%fields);
         $package_manager->register_file($pkgmap_entry, $pkginst);
     }
 } 
@@ -1043,6 +1331,7 @@ my %available_commands = (
     'pkginfo'  => \&info_cmd,
     'pkgadd'   => \&add_cmd,
     'pkgparam' => \&param_cmd,
+    'pkgchk' => \&chk_cmd,
     'installf' => \&installf_cmd,
 );
 
