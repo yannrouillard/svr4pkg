@@ -133,7 +133,7 @@ use warnings;
         foreach my $field (@package_entry_fields) {
             $self->{$field} = (not exists($pkgmap_fields{$field})) ? undef
                             :            exists($fields->{$field}) ? $fields->{$field}
-                            :                                         undef;
+                            :                                        undef;
         }
         bless($self, $class);
 
@@ -310,8 +310,6 @@ use warnings;
 
         my $pkgmap_entry = Package::Entry->new_from_file($path);
 
-
-
         foreach my $field (@compliance_fields) {
             next if (not defined($self->{$field}));
 
@@ -351,7 +349,7 @@ use warnings;
     use File::Spec::Functions qw(catfile);
     use List::Util qw(first);
 
-    use Fatal qw( open close copy );
+    use Fatal qw( close copy );
 
     my @short_format_fields = qw(CATEGORY PKGINST NAME);
     my @long_format_fields  = qw(
@@ -403,15 +401,22 @@ use warnings;
             pathnames => 1,   information_files => 1, 
         };
 
-        $self->_load_parameters_file("$path/$pkginst/pkginfo");
+        if (not $self->_load_parameters_file("$path/$pkginst/pkginfo")) {
+            return;
+        }
 
         # Handling optional arguments
         $self->{path_mappings}
             = exists($options->{path_mappings}) ? $options->{path_mappings} 
             :                                     {};
+
         $self->{pkgmap} 
             = exists($options->{package_entries}) ? $options->{package_entries}
             :                                       $self->_load_pkgmap();
+
+        if (not defined($self->{pkgmap})) {
+            return;
+        }
 
         $self->_update_package_info();
 
@@ -544,6 +549,38 @@ use warnings;
 
 
     #
+    # Purpose:    Remove the package files on the server at the given location,
+    #             running the corresponding class action scripts if required.
+    # Parameters: 
+    #   $dest                    - the root directory where files have been installed
+    #   $action_scripts_location - an optional directory where class action scripts
+    #                              must be looked for.
+    #
+    sub remove_files
+    {
+        my ($self, $dest, $action_scripts_location) = @_;
+
+        my @classes = split(/\s+/, $self->{pkginfo}{CLASSES});
+        # The none class is always processed first
+        @classes = ('none', grep { $_ ne 'none' } @classes);
+
+        foreach my $class (@classes) {
+
+            my @pkgmap_entries = grep { not $_->is_information_file() 
+                and $_->{class} eq $class } @{$self->{pkgmap}};
+
+            my $action_script = $self->check_installation_script ("r.$class", $action_scripts_location);
+
+            if (defined($action_script)) {
+                $self->_remove_files_by_action_script(\@pkgmap_entries, $dest, $action_script);
+            } else {
+                $self->_remove_files_by_unlink(\@pkgmap_entries, $dest);
+            }
+        }
+    }
+
+
+    #
     # Purpose:    Check that the property of the files currently installed
     #             match the ones specified in the package.
     #             Returns the list of non compliant files and associated
@@ -635,7 +672,7 @@ use warnings;
     sub _load_parameters_file {
         my ($self, $file) = @_;
 
-        open (my $fh, '<', $file) or die;
+        open (my $fh, '<', $file) or return;
         while (my $line = <$fh>) {
             chomp($line);
             my ($key, $value) = split(/=/, $line, 2);
@@ -793,6 +830,31 @@ use warnings;
     
 
     #
+    # Purpose:       Remove the files of the package on the target location
+    #                using a standard deletion operation.
+    #
+    # Parameters: 
+    #   $pkgmap_entry - the list of pkgmap entries whose corresponding files
+    #                   must be installed on the target file system.
+    #   $dest         - the root directory where files must be installed
+    #
+    sub _remove_files_by_unlink {
+
+        my ($self, $pkgmap_entries, $dest) = @_;
+
+        foreach my $pkgmap_entry (@$pkgmap_entries) {
+            my $dest_path= $self->_build_path($pkgmap_entry, $dest);
+
+            if ($pkgmap_entry->is_directory()) {
+                rmdir($dest_path);
+            } else {
+                unlink($dest_path);
+            }
+        }
+    }
+
+
+    #
     # Purpose:       Install the files of the package on the target location
     #                using a standard copy/link/symlink operation, depending
     #                on the file type.
@@ -822,6 +884,35 @@ use warnings;
         close ($fh);
     }
 			
+
+    #
+    # Purpose:       Remove the files of the package on the target location
+    #                using a class action script.
+    #
+    # Parameters: 
+    #   $pkgmap_entry  - the list of pkgmap entries whose corresponding files
+    #                    must be installed on the target file system.
+    #   $dest          - the root directory where files must be installed
+    #   $action_script - path of the action script that will take care of
+    #                    installating the pkgmap entries
+    #
+    sub _remove_files_by_action_script {
+        my ($self, $pkgmap_entries, $dest, $action_script) = @_;
+
+        $action_script = $self->_relocate_path_in_script($action_script);
+
+        @ENV{keys(%{$self->{pkginfo}})} = values(%{$self->{pkginfo}});
+        open(my $fh, "| $action_script");
+
+        foreach my $pkgmap_entry (@$pkgmap_entries) {
+            # An action class script takes as input of list of files to remove 
+            my $dest_path = $self->_build_path($pkgmap_entry, $dest);
+            print $fh "$dest_path\n";
+        }
+        print $fh 'ENDOFCLASS';
+        close ($fh);
+    }
+
 
     #
     # Purpose:       Parses the content of the given scripts 
@@ -873,7 +964,7 @@ use warnings;
     use List::Util qw(first);
     use File::Spec::Functions qw(catfile);
     use File::Basename qw(dirname);
-    use File::Path qw(make_path);
+    use File::Path qw(make_path remove_tree);
     use Tie::File;
 
     use constant NATIVE_ACTION_SCRIPTS_LOCATION => '/usr/sadm/install/scripts/';
@@ -1084,6 +1175,56 @@ use warnings;
     }
 
     #
+    # Purpose:    Unregisters the given file from the package content 
+    #             database (usually the /var/sadm/install/contents file)
+    #
+    # Parameters: 
+    #   $pkgmap_entry - the pkgmap entry that must be registered
+    #   $pkginst      - the pkginst which owns this entry
+    #   $start        - an optional index in the contents array.
+    #                   The method will look where to add the 
+    #                   new entry after this location.
+    # 
+    sub unregister_file
+    {
+        my ($self, $pkgmap_entry, $pkginst, $start) = @_;
+        if (not defined($start)) {
+            $start = 0;
+        }
+
+        tie (my @contents, 'Tie::File', $self->{content_file});
+
+        # /var/sadm/install/contents is plain text file which contains a sorted
+        # list of files installed by package, so we must first find the
+        # location where we must insert a new line for our file.
+        my ($idx, $filename_at_idx)
+            = $self->_find_insert_position(\@contents, $pkgmap_entry, $start); 
+
+        next if ($filename_at_idx ne $pkgmap_entry->{filename});
+
+        # Directories are a special case, they are allowed
+        # to be owned by more than one package
+        if ($pkgmap_entry->is_directory()) {
+            # the list of packages already owning the directory
+            # is located after the six standard fields
+            my @values = split(/\s+/, $contents[$idx]);
+            my @pkginsts = grep { $_ ne $pkginst } @values[6..$#values];
+            my $pkgmap_entry = Package::Entry->new_from_line($contents[$idx], 'contents');
+            $contents[$idx] = $pkgmap_entry->as_contents_line(@pkginsts);
+
+        } else { 
+            #  we shift the array by one to make room for our new file
+            if ($idx <= $#contents) {
+                splice(@contents, $idx, 1);
+            }
+        }
+        untie(@contents);
+
+        return ($idx);
+    }
+
+
+    #
     # Purpose:    Install the given package on the system
     #
     # Parameters: 
@@ -1116,6 +1257,40 @@ use warnings;
 
         $self->_verbose('## Executing postinstall script');
         $package->execute_procedure_script('postinstall');
+    }
+
+
+    #
+    # Purpose:    Removes the given package from the system
+    #
+    # Parameters: 
+    #   $package - a Package object whose content must be 
+    #              installed on the server.
+    #   $dest    - the root location where the package files
+    #              must be installed.
+    # 
+    sub remove_package
+    {
+        my ($self, $package, $dest) = @_;
+
+        if (defined($self->{binaries_location})) {
+            # We make sure the location of the svr4pkg tools are
+            # in the paths so they are found by installation scripts
+            $ENV{PATH} = $self->{binaries_location} . ':' . $ENV{PATH};
+        }
+
+        $self->_verbose('## Executing preremove script');
+        $package->execute_procedure_script('preremove');
+
+        $self->_verbose('## Removing package files');
+        $package->remove_files($dest, $self->{action_scripts_location});
+
+        $self->_verbose('## Executing postremove script');
+        $package->execute_procedure_script('postremove');
+
+        $self->_verbose('## Unregistering the package');
+        $self->_unregister_package($package);
+
     }
 
 
@@ -1164,6 +1339,35 @@ use warnings;
             # so we do not need to start again from index 0
             $index = $self->register_file($pkgmap_entry, $package->{pkginst}, $index);
         }
+    }
+
+
+    #
+    # Purpose:    Register the package in the package database and
+    #             package content database.
+    #
+    # Parameters: 
+    #   $package - the package that must be registered
+    # 
+    sub _unregister_package
+    {
+        my ($self, $package) = @_;
+
+        my $pkgmap = $package->{pkgmap};
+        my $index = 0;
+        foreach my $pkgmap_entry (sort(@$pkgmap)) {
+            next if ($pkgmap_entry->is_information_file());
+
+            # the contents files is sorted and so is our list of pkgmap_entry
+            # so we do not need to start again from index 0
+            $index = $self->unregister_file($pkgmap_entry, $package->{pkginst}, $index);
+        }
+
+        # update /var/sadm/pkg 
+        # we just delete the package directory in /var/sadm/pkg
+        my $package_directory = catfile($self->{pkg_directory}, $package->{pkginst});
+        remove_tree($package_directory);
+
     }
 
 
@@ -1258,6 +1462,27 @@ sub add_cmd {
     }
 }
 
+sub remove_cmd {
+
+    my $package_manager = shift;
+
+    if (@ARGV) {
+        my @packages_list;
+        foreach my $pkginst (@ARGV) {
+            my $package = $package_manager->get_package($device, $pkginst);
+            if (not defined($package)) {
+                print STDERR "ERROR: no package associated with <$pkginst>\n";
+                exit (1);
+            }
+            push (@packages_list, $package);
+        }
+
+        foreach my $package (@packages_list) {
+            $package_manager->remove_package($package, '/');
+        }
+    }
+}
+
 sub param_cmd {
 
     my $package_manager = shift;
@@ -1326,10 +1551,29 @@ sub installf_cmd {
 } 
 
 
+sub removef_cmd {
+
+    my $package_manager = shift;
+
+    if (@ARGV > 1) {
+        my $pkginst = shift(@ARGV);
+        my @pathnames = sort(@ARGV);
+        my $package_entries = $package_manager->list_installed_files($pkginst);
+
+        foreach my $pathname (@pathnames) {
+            my $pkgmap_entry = first { $_->{filename} eq $pathname } @$package_entries;
+            next if (not defined ($pkgmap_entry));
+            $package_manager->unregister_file($pkgmap_entry, $pkginst);
+        }
+    }
+} 
+
+
 
 my %available_commands = (
     'pkginfo'  => \&info_cmd,
     'pkgadd'   => \&add_cmd,
+    'pkgrm'   => \&remove_cmd,
     'pkgparam' => \&param_cmd,
     'pkgchk' => \&chk_cmd,
     'installf' => \&installf_cmd,
@@ -1379,7 +1623,7 @@ svr4pkg [command] [option]... [package]...
 Svr4pkg is a tool to emulate the basic behaviour of the set of solaris tools used to manipulate 
 svr4 packages (pkgadd, pkgrm, pkginfo...).
 It aimed at being used on illumos-based operating systems that do not provide the legacy
-svr4 package tools, so that it's easy to install legacy svr4 packages on these systems.
+svr4 package tools, so that it's easy to install svr4 packages on these systems.
 
 =head1 WARNING
 
