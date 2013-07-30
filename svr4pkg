@@ -348,6 +348,7 @@ use warnings;
     use File::Path qw(make_path);
     use File::Spec::Functions qw(catfile);
     use List::Util qw(first);
+    use POSIX qw(strftime);
 
     use Fatal qw( close copy );
 
@@ -356,6 +357,9 @@ use warnings;
         PKGINST NAME   CATEGORY ARCH  VERSION
         VENDOR  PSTAMP HOTLINE  EMAIL STATUS  FILES
     );
+
+    # Those fields are not saved after package installation
+    my @unexported_fields   = qw(INST_DATADIR PKG_CLIENT_OS);
 
     my @package_statistics = (
         { 'name' => 'pathnames',         'display' => 'spooled pathnames' },
@@ -425,6 +429,7 @@ use warnings;
         $self->{pkginfo}{PKGINST}       = $pkginst;
         $self->{pkginfo}{INST_DATADIR}  = $path;
         $self->{pkginfo}{PKG_CLIENT_OS} = 'Solaris';
+        $self->{pkginfo}{BASEDIR}       = '/' if (not exists($self->{pkginfo}{BASEDIR}));
 
         return ($self);
     }
@@ -506,8 +511,11 @@ use warnings;
     {
         my ($self, $dest) = @_;
 
-        my @pkgmap_entries = grep { $_->is_information_file() } @{$self->{pkgmap}};
+        my @pkgmap_entries = grep { $_->is_information_file()
+                                    and $_->{pathname} ne 'pkginfo' } @{$self->{pkgmap}};
         $self->_install_files_by_copy(\@pkgmap_entries, $dest);
+        $self->{pkginfo}{INSTDATE} = strftime('%b %d %Y %H:%M', localtime());
+        $self->_dump_parameters_file("$dest/pkginfo");
     }
 
 
@@ -562,7 +570,7 @@ use warnings;
 
         my @classes = split(/\s+/, $self->{pkginfo}{CLASSES});
         # The none class is always processed first
-        @classes = ('none', grep { $_ ne 'none' } @classes);
+        @classes = reverse('none', grep { $_ ne 'none' } @classes);
 
         foreach my $class (@classes) {
 
@@ -680,6 +688,26 @@ use warnings;
         }
         close ($fh);
     }
+
+
+    #
+    # Purpose:    Load a parameters file which has the following form
+    #              PARAMETER=VALUE
+    #
+    # Parameters: 
+    #   $file       - the path of the parameters file to load
+    #
+    sub _dump_parameters_file {
+        my ($self, $file) = @_;
+
+        open (my $fh, '>', $file) or return;
+        foreach my $key (keys(%{$self->{pkginfo}})) {
+            next if grep { $_ eq $key } @unexported_fields;
+            printf $fh ("%s=%s\n", ($key, $self->{pkginfo}{$key}));
+        }
+        close ($fh);
+    }
+
 
     #
     # Purpose:    Given a Package::Entry objet, this method returns
@@ -1323,8 +1351,6 @@ use warnings;
         # in the installed packages directory
         my $package_directory = catfile($self->{pkg_directory}, $package->{pkginst});
         $package->install_information_files ($package_directory);
-        my $pspool_directory = catfile($package_directory, 'save/pspool', $package->{pkginst});
-        $package->install_information_files ($pspool_directory);
 
         # update /var/sadm/install/contents 
         make_path(dirname($self->{content_file}));
