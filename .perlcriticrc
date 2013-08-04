@@ -1,7 +1,7 @@
-severity = cruel
+severity = brutal
 
 [InputOutput::RequireBriefOpen]
-lines = 20
+lines = 25
 
 # Not so easy to detect when a regular expression
 # needs to be detailled, the size is surely not
@@ -12,11 +12,17 @@ minimum_regex_length_to_complain_about = 40
 [ValuesAndExpressions::ProhibitMagicNumbers]
 allowed_values = 0 1 2 8 256
 
+[InputOutput::RequireCheckedSyscalls]
+exclude_functions = print
+
 # This script is supposed to be easily installed to bootstrap
 # installations so we keep all packages definitions in the same
 # file, so we ignore these critics
 [-Modules::RequireVersionVar]
 [-Modules::ProhibitMultiplePackages]
+
+# I prefer to handle perl tidy on my own
+[-CodeLayout::RequireTidyCode]
 
 # We will probably enable these ones later
 [-InputOutput::ProhibitBacktickOperators]
@@ -30,3 +36,5 @@ allowed_values = 0 1 2 8 256
 [-RegularExpressions::RequireDotMatchAnything]
 [-Subroutines::RequireFinalReturn]
 [-ValuesAndExpressions::ProhibitConstantPragma]
+[-CodeLayout::ProhibitParensWithBuiltins]
+[-InputOutput::RequireBracedFileHandleWithPrint]
