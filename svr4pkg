@@ -62,7 +62,7 @@ use warnings;
     # Mapping between the file type and the format of the line
     # for that file type, both for a pkgmap file and the
     # /var/sadm/install/contents file
-    # Between the two, the only difference is that in the latter 
+    # Between the two, the only difference is that, in the latter 
     # the pathname field is first and the part field is absent.
     my %line_format_for = (
         'pkgmap' => {
@@ -401,8 +401,9 @@ use warnings;
         $self->{pkginst}         = $pkginst;
         $self->{package_scripts} = {};
         $self->{statistics}      = {
-            directories => 0, executables => 0,
-            pathnames => 1,   information_files => 1, 
+            directories => 0, executables       => 0,
+            pathnames   => 1, information_files => 1, 
+            blocks      => 0,
         };
 
         if (not $self->_load_parameters_file("$path/$pkginst/pkginfo")) {
@@ -1258,12 +1259,11 @@ use warnings;
     # Parameters: 
     #   $package - a Package object whose content must be 
     #              installed on the server.
-    #   $dest    - the root location where the package files
-    #              must be installed.
     # 
     sub install_package
     {
-        my ($self, $package, $dest) = @_;
+        my ($self, $package) = @_;
+        my $dest = $self->{root_path};
 
         if (defined($self->{binaries_location})) {
             # We make sure the location of the svr4pkg tools are
@@ -1299,7 +1299,8 @@ use warnings;
     # 
     sub remove_package
     {
-        my ($self, $package, $dest) = @_;
+        my ($self, $package) = @_;
+        my $dest = $self->{root_path};
 
         if (defined($self->{binaries_location})) {
             # We make sure the location of the svr4pkg tools are
@@ -1439,6 +1440,7 @@ use File::Basename qw(basename dirname);
 
 # Default configuration for the package manager
 my %package_manager_config = (
+    'root_path'               => '/',
     'admin_directory'         => '/var/sadm',
     'spool_directory'         => '/var/spool/pkg',
     'action_scripts_location' => '/var/sadm/install/scripts',
@@ -1447,55 +1449,80 @@ my %package_manager_config = (
     'binaries_location'       => dirname($0),
 );
 
-# Default configuration of command line options
-my $display_long_info;
-my $device             = '/var/sadm/pkg';
-my $class              = 'none';
-my $force;
-
 
 ## Commands subroutines
 
-sub usage {
-    my $ret = shift;
-    print <<EOF;
-svr4pkg, mimic solaris native svr4 package tools (pkgadd, pkgrm, pkginfo...)
+# The options common to all svr4pkg commands
+my %common_options_specs = (
+    'root_path'   => { 'spec'  => 'R=s', 'default' => '/' },
+);
 
-Usage: svr4pkg [command] [options] [package...]
-EOF
-    exit ($ret);
-}
+# This hash will be filled with the 
+my %commands_options_specs;
+
+# This hash will be filled with name of each command
+my %available_commands;
+
+
+## pkginfo command ######################################################
+
+$available_commands{'pkginfo'} = \&info_cmd;
+$commands_options_specs{'pkginfo'} = {
+    'device'      => { 'spec'  => 'd=s', 'default' => '/var/sadm/pkg' },
+    'long_format' => { 'spec'  => 'l',   'default' => 0   },
+};
 
 sub info_cmd {
 
-    my $package_manager = shift;
+    my ($package_manager, $options, @arguments) = @_;
 
-    my $package_names = @ARGV ? \@ARGV : $package_manager->list_installed_packages();
+    my $package_names = @arguments ? \@arguments : $package_manager->list_installed_packages();
     foreach my $package_name (@$package_names) {
-        my $package = $package_manager->get_package($device, $package_name);
-        print ($package->get_info($display_long_info ? 'long' : 'short') . "\n");
+        my $package = $package_manager->get_package($options->{device}, $package_name);
+        if (not defined($package)) {
+            print STDERR "ERROR: information for \"$package_name\" was not found\n";
+        } else {
+            print ($package->get_info($options->{long_format} ? 'long' : 'short') . "\n");
+        }
     }
 }
 
+## pkgadd command ######################################################
+
+$available_commands{'pkgadd'} = \&add_cmd;
+$commands_options_specs{'pkgadd'} = {
+    'device'      => { 'spec'  => 'd=s', 'default' => '/var/spool/pkg' },
+    'trace'       => { 'spec'  => 'd',   'default' => 0 },
+};
+
 sub add_cmd {
 
-    my $package_manager = shift;
+    my ($package_manager, $options, @arguments) = @_;
 
-    if (@ARGV) {
-        my $pkginst = shift (@ARGV);
-        my $package = $package_manager->get_package($device, $pkginst);
+    if (@arguments) {
+        my $pkginst = shift (@arguments);
+        my $package = $package_manager->get_package($options->{device}, $pkginst);
         $package_manager->install_package($package, '/');
     }
 }
 
-sub remove_cmd {
+## removef command ######################################################
 
-    my $package_manager = shift;
+$available_commands{'pkgrm'} = \&rm_cmd;
+$commands_options_specs{'pkgrm'} = {
+    'device'      => { 'spec'  => 'd=s', 'default' => '/var/sadm/pkg' },
+    'root_path'   => { 'spec'  => 'R=s', 'default' => '/' },
+    'trace'       => { 'spec'  => 'd',   'default' => 0 },
+};
 
-    if (@ARGV) {
+sub rm_cmd {
+
+    my ($package_manager, $options, @arguments) = @_;
+
+    if (@arguments) {
         my @packages_list;
-        foreach my $pkginst (@ARGV) {
-            my $package = $package_manager->get_package($device, $pkginst);
+        foreach my $pkginst (@arguments) {
+            my $package = $package_manager->get_package($options->{device}, $pkginst);
             if (not defined($package)) {
                 print STDERR "ERROR: no package associated with <$pkginst>\n";
                 exit (1);
@@ -1509,18 +1536,32 @@ sub remove_cmd {
     }
 }
 
+## pkgparam command ######################################################
+
+$available_commands{pkgparam} = \&param_cmd;
+$commands_options_specs{pkgparam} = {
+    'device'      => { 'spec'  => 'd=s', 'default' => '/var/sadm/pkg' },
+    'root_path'   => { 'spec'  => 'R=s', 'default' => '/' },
+};
+
 sub param_cmd {
 
-    my $package_manager = shift;
+    my ($package_manager, $options, @arguments) = @_;
 
-    if (@ARGV) {
-        my $pkginst = shift (@ARGV);
-        my $package = $package_manager->get_package($device, $pkginst);
-        print join("\n", map { $package->{pkginfo}->{$_} } @ARGV) . "\n";
+    if (@arguments) {
+        my $pkginst = shift (@arguments);
+        my $package = $package_manager->get_package($options->{device}, $pkginst);
+        print join("\n", map { $package->{pkginfo}->{$_} } @arguments) . "\n";
     }
 } 
 
 
+## pkgchk command ######################################################
+
+$available_commands{pkgchk} = \&chk_cmd;
+$commands_options_specs{pkgchk} = {
+    'device'      => { 'spec'  => 'd=s', 'default' => '/var/sadm/pkg' },
+};
 
 my %field_display_name = (
     'ftype'   => 'file type',
@@ -1536,12 +1577,12 @@ my %field_display_name = (
 
 sub chk_cmd {
 
-    my $package_manager = shift;
+    my ($package_manager, $options, @arguments) = @_;
 
-    my $package_names = @ARGV ? \@ARGV : $package_manager->list_installed_packages();
+    my $package_names = @arguments ? \@arguments : $package_manager->list_installed_packages();
     foreach my $pkginst (@$package_names) {
-        my $package = $package_manager->get_package($device, $pkginst);
-        foreach my $entry_error (@{$package->check_installed_files('/')}) {
+        my $package = $package_manager->get_package($options->{device}, $pkginst);
+        foreach my $entry_error (@{$package->check_installed_files($options->{root_path})}) {
             my $package_entry = $entry_error->{package_entry};
             printf STDERR ("ERROR: %s\n", ($package_entry->{filename}));
             foreach my $error (@{$entry_error->{errors}}) {
@@ -1557,18 +1598,25 @@ sub chk_cmd {
     }
 } 
 
+## installf command ######################################################
+
+$available_commands{installf} = \&installf_cmd;
+$commands_options_specs{installf} = {
+    'class'     => { 'spec'  => 'c',   'default' => 'none' },
+};
+
 sub installf_cmd {
 
-    my $package_manager = shift;
+    my ($package_manager, $options, @arguments) = @_;
 
-    if (@ARGV > 1) {
-        my ($pkginst, $pathname, $ftype) = @ARGV[0..2];
-        my %fields;
+    if (@arguments > 1) {
+        my ($pkginst, $pathname, $ftype) = @arguments[0..2];
+        my %fields = { 'class' => $options->{class} };
 
-        if (@ARGV > 6) {
-            $fields{'major', 'minor', 'mode', 'owner', 'group'} = @ARGV[3..7];
-        } elsif (@ARGV > 3) {
-            $fields{'mode', 'owner', 'group'} = @ARGV[3..5];
+        if (@arguments > 6) {
+            $fields{'major', 'minor', 'mode', 'owner', 'group'} = @arguments[3..7];
+        } elsif (@arguments > 3) {
+            $fields{'mode', 'owner', 'group'} = @arguments[3..5];
         }
 
         my $pkgmap_entry = Package::Entry->new_from_file ($pathname, \%fields);
@@ -1577,13 +1625,18 @@ sub installf_cmd {
 } 
 
 
+## removef_cmd command ######################################################
+
+$available_commands{removef} = \&removef_cmd;
+$commands_options_specs{removef} = {}; 
+
 sub removef_cmd {
 
-    my $package_manager = shift;
+    my ($package_manager, $options, @arguments) = @_;
 
-    if (@ARGV > 1) {
-        my $pkginst = shift(@ARGV);
-        my @pathnames = sort(@ARGV);
+    if (@arguments > 1) {
+        my $pkginst = shift(@arguments);
+        my @pathnames = sort(@arguments);
         my $package_entries = $package_manager->list_installed_files($pkginst);
 
         foreach my $pathname (@pathnames) {
@@ -1594,34 +1647,26 @@ sub removef_cmd {
     }
 } 
 
+## usage command ######################################################
 
+sub usage {
+    my $ret = shift;
+    print <<EOF;
+svr4pkg, mimic solaris native svr4 package tools (pkgadd, pkgrm, pkginfo...)
 
-my %available_commands = (
-    'pkginfo'  => \&info_cmd,
-    'pkgadd'   => \&add_cmd,
-    'pkgrm'   => \&remove_cmd,
-    'pkgparam' => \&param_cmd,
-    'pkgchk' => \&chk_cmd,
-    'installf' => \&installf_cmd,
-);
+Usage: svr4pkg [command] [options] [package...]
+EOF
+    exit ($ret);
+}
+
 
 
 ## Command line parsing and execution
 
-Getopt::Long::Configure ("no_ignore_case");  
-GetOptions('d=s' => \$device,
-           'l'   => \$display_long_info,
-           'c=s' => \$class,
-           'f'   => \$force);
-
-my $pkgmgr = Package::Manager->new(\%package_manager_config);
-
-# One can create symlinks to svr4pkg using original solaris svr4 package
-# tools as names.
-# In that case, the symlink name is used to know the command to be run.
+# One can create symlinks to svr4pkg using original solaris svr4 package tools
+# as names. In that case, the symlink name is used to know the command to be run.
 my $command = basename($0);
-
-if (@ARGV and not exists($available_commands{$command})) {
+if (not exists($available_commands{$command}) and @ARGV) {
     # otherwise the first argument is used to know which command must be used
     $command = 'pkg' . shift(@ARGV);
 }
@@ -1630,8 +1675,36 @@ if (not exists($available_commands{$command})) {
     usage (1);
 }
 
+Getopt::Long::Configure ("no_ignore_case");  
+
+# The options values will be put in this hash
+my %options;
+
+# We define the command line options specifications by merging the
+# common options and the the one specific to the command used
+my %options_specs = %common_options_specs;
+@options_specs{keys(%{$commands_options_specs{$command}})} = values(%{$commands_options_specs{$command}});
+
+# We want to have only short options available for the user like the original
+# command but we also want meaning full name in our options hash, to do
+# that we dynamically create the GetOptions arguments based on the options
+# specifications instead of using the native GetOptions way of storing options
+# values in a hash
+my %getoptions_args;
+foreach my $option_name (keys(%options_specs)) {
+    my $option_specs = $options_specs{$option_name};
+    $options{$option_name} = exists($option_specs->{default}) ? $option_specs->{default} : undef;
+    $getoptions_args{$option_specs->{spec}} = \$options{$option_name};
+}
+GetOptions(%getoptions_args);
+
+
+$package_manager_config{root_path} = $options{root_path};
+my $pkgmgr = Package::Manager->new(\%package_manager_config);
+
+# 
 my $command_sub = $available_commands{$command};
-&$command_sub($pkgmgr);
+&$command_sub($pkgmgr, \%options, @ARGV);
 
 
 # POD start
