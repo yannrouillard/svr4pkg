@@ -1,0 +1,32 @@
+severity = cruel
+
+[InputOutput::RequireBriefOpen]
+lines = 20
+
+# Not so easy to detect when a regular expression
+# needs to be detailled, the size is surely not
+# the adequate metric
+[RegularExpressions::RequireExtendedFormatting]
+minimum_regex_length_to_complain_about = 40
+
+[ValuesAndExpressions::ProhibitMagicNumbers]
+allowed_values = 0 1 2 8 256
+
+# This script is supposed to be easily installed to bootstrap
+# installations so we keep all packages definitions in the same
+# file, so we ignore these critics
+[-Modules::RequireVersionVar]
+[-Modules::ProhibitMultiplePackages]
+
+# We will probably enable these ones later
+[-InputOutput::ProhibitBacktickOperators]
+[-Documentation::RequirePodSections]
+[-Miscellanea::ProhibitTies]
+
+# This critics are debatable
+[-ValuesAndExpressions::ProhibitNoisyQuotes]
+[-ValuesAndExpressions::ProhibitEmptyQuotes]
+[-RegularExpressions::RequireLineBoundaryMatching]
+[-RegularExpressions::RequireDotMatchAnything]
+[-Subroutines::RequireFinalReturn]
+[-ValuesAndExpressions::ProhibitConstantPragma]
