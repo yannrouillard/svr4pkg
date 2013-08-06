@@ -157,7 +157,7 @@ else {
 
     opendir( my $dh, $default_package_directory );
     my @test_cases = grep { $_ !~ /^[.]{1,2}$/ } readdir($dh);
-    close($dh);
+    closedir($dh);
 
     foreach my $case (@test_cases) {
         opendir( my $dh, "$default_package_directory/$case" );
