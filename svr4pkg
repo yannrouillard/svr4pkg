@@ -289,13 +289,15 @@ use 5.010001;
     #               they will be listed at the end of the line.
     #
     sub as_contents_line {
-        my ( $self, @pkginsts ) = @_;
+        my ( $self ) = @_;
 
         # information files are not stored in the contents file
         return if ( $self->is_information_file() );
 
+        my $pkginsts = $self->{packages};
+
         my $contents_line_fields = $line_format_for{'contents'}{ $self->{ftype} };
-        return join( ' ', ( map ( { $self->{$_} } @{$contents_line_fields} ), @pkginsts ) );
+        return join( ' ', ( map ( { $self->{$_} } @{$contents_line_fields} ), @{$pkginsts} ) );
     }
 
     #
@@ -315,6 +317,18 @@ use 5.010001;
         }
     }
 
+
+    #
+    # Purpose:    Set the list of packages that own this entry
+    # Parameters:
+    #   @pkginsts - the list of SVR4 package names that own this entry
+    #
+    sub set_package_owners {
+        my ( $self, @pkginsts ) = @_;
+	my @package_owners = @pkginsts;
+	$self->{packages} = \@package_owners;
+    }
+
     #
     # Purpose:    Remove one or more packages from the list of packages
     #             that own this entry
@@ -322,7 +336,7 @@ use 5.010001;
     #   @pkginsts - the list of SVR4 package names that don't own this
     #               entry anymore
     #
-    sub add_remove_package_owners {
+    sub remove_package_owners {
         my ( $self, @pkginsts ) = @_;
 
         my @packages;
@@ -1247,6 +1261,7 @@ use 5.010001;
             {
 
                 my $package_entry = Package::Entry->new_from_line( $line, 'contents' );
+		$package_entry->set_package_owners( $pkginst );
                 push( @pkgmap_entries, $package_entry );
             }
         }
@@ -1442,7 +1457,7 @@ use 5.010001;
 
             # the contents files is sorted and so is our list of pkgmap_entry
             # so we do not need to start again from index 0
-            $index = $self->register_file( $pkgmap_entry, $package->{pkginst}, $index );
+            $index = $self->register_file( $pkgmap_entry, $index );
         }
     }
 
@@ -1463,7 +1478,7 @@ use 5.010001;
 
             # the contents files is sorted and so is our list of pkgmap_entry
             # so we do not need to start again from index 0
-            $index = $self->unregister_file( $pkgmap_entry, $package->{pkginst}, $index );
+            $index = $self->unregister_file( $pkgmap_entry, $index );
         }
 
         # update /var/sadm/pkg
