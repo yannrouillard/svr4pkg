@@ -1132,8 +1132,8 @@ use 5.010001;
         my $self = {};
 
         %{$self} = %{$package_manager_config};
-        $self->{pkg_directory} = catfile( $self->{admin_directory}, 'pkg' );
-        $self->{content_file}  = catfile( $self->{admin_directory}, 'install/contents' );
+        $self->{pkg_directory} = catfile( $self->{root_path}, $self->{admin_directory}, 'pkg' );
+        $self->{content_file}  = catfile( $self->{root_path}, $self->{admin_directory}, 'install/contents' );
         $self->{path_mappings} = {};
 
         # We will make sure any class actions scripts installed by a package
