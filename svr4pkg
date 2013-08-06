@@ -1162,13 +1162,18 @@ use 5.010001;
     #             given configuration
     #
     # Parameters:
-    #   $package_path - a hash reference containing the
-    #                   configuration parameters
+    #   $pkginst - SVR4 package name of the package to return
+    #   $device  - optional path to the device where the package
+    #              is present
     #
     sub get_package {
-        my ( $self, $device, $pkginst ) = @_;
+        my ( $self, $pkginst, $device ) = @_;
         my $package_entries;
         my $options = { path_mapping => $self->{path_mapping} };
+
+        if (not defined($device)) {
+	    $device = $self->{pkg_directory};
+        }
 
         if ( -f $device ) {
 
@@ -1567,7 +1572,7 @@ sub info_cmd {
 
     my $package_names = @arguments ? \@arguments : $package_manager->list_installed_packages();
     foreach my $package_name ( @{$package_names} ) {
-        my $package = $package_manager->get_package( $options->{device}, $package_name );
+        my $package = $package_manager->get_package( $package_name, $options->{device} );
         if ( not defined($package) ) {
             print STDERR "ERROR: information for \"$package_name\" was not found\n";
         }
@@ -1591,7 +1596,7 @@ sub add_cmd {
 
     if (@arguments) {
         my $pkginst = shift(@arguments);
-        my $package = $package_manager->get_package( $options->{device}, $pkginst );
+        my $package = $package_manager->get_package( $pkginst, $options->{device} );
         $package_manager->install_package( $package, '/' );
     }
 }
@@ -1600,7 +1605,6 @@ sub add_cmd {
 
 $available_commands{'pkgrm'}     = \&rm_cmd;
 $commands_options_specs{'pkgrm'} = {
-    'device'    => { 'spec' => 'd=s', 'default' => '/var/sadm/pkg' },
     'root_path' => { 'spec' => 'R=s', 'default' => '/' },
     'trace'     => { 'spec' => 'd',   'default' => 0 },
 };
@@ -1612,7 +1616,7 @@ sub rm_cmd {
     if (@arguments) {
         my @packages_list;
         foreach my $pkginst (@arguments) {
-            my $package = $package_manager->get_package( $options->{device}, $pkginst );
+            my $package = $package_manager->get_package( $pkginst );
             if ( not defined($package) ) {
                 print STDERR "ERROR: no package associated with <$pkginst>\n";
                 exit(1);
@@ -1640,7 +1644,7 @@ sub param_cmd {
 
     if (@arguments) {
         my $pkginst = shift(@arguments);
-        my $package = $package_manager->get_package( $options->{device}, $pkginst );
+        my $package = $package_manager->get_package( $pkginst, $options->{device} );
         print join( "\n", map { $package->{pkginfo}->{$_} } @arguments ) . "\n";
     }
 }
@@ -1668,7 +1672,7 @@ sub chk_cmd {
 
     my $package_names = @arguments ? \@arguments : $package_manager->list_installed_packages();
     foreach my $pkginst ( @{$package_names} ) {
-        my $package = $package_manager->get_package( $options->{device}, $pkginst );
+        my $package = $package_manager->get_package( $pkginst, $options->{device} );
         foreach my $entry_error ( @{ $package->check_installed_files( $options->{root_path} ) } ) {
             my $package_entry = $entry_error->{package_entry};
             printf STDERR ( "ERROR: %s\n", ( $package_entry->{filename} ) );
