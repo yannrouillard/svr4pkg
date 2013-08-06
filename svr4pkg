@@ -675,6 +675,9 @@ use 5.010001;
             my @pkgmap_entries =
               grep { not $_->is_information_file() and $_->{class} eq $class } @{ $self->{pkgmap} };
 
+            # We want the list reverse sorted so that we first remove the deepest paths
+            @pkgmap_entries = reverse(sort(@pkgmap_entries));
+
             my $action_script = $self->check_installation_script( "r.$class", $action_scripts_location );
 
             if ( defined($action_script) ) {
