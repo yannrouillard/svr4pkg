@@ -176,12 +176,10 @@ foreach my $test_case ( keys(%test_cases_and_packages) ) {
     foreach my $package ( @{$packages_list} ) {
 
         clean_playground( $playground_path, 'reset' );
-        my $native_results =
-          play_scenario( $playground_path, \@scenario, $package, 'native' );
+        my $native_results = play_scenario( $playground_path, \@scenario, $package, 'native' );
 
         clean_playground( $playground_path, 'reset' );
-        my $svr4pkg_results =
-          play_scenario( $playground_path, \@scenario, $package, 'svr4pkg' );
+        my $svr4pkg_results = play_scenario( $playground_path, \@scenario, $package, 'svr4pkg' );
 
         foreach my $action (@scenario) {
             is_deeply(
