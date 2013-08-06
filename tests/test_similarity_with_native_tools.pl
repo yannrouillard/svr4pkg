@@ -157,13 +157,13 @@ else {
 
     opendir( my $dh, $default_package_directory );
     my @test_cases = grep { $_ !~ /^[.]{1,2}$/ } readdir($dh);
-    close($dh) or croak;
+    close($dh);
 
     foreach my $case (@test_cases) {
-        opendir( my $dh, "$default_package_directory/$case" ) or croak;
+        opendir( my $dh, "$default_package_directory/$case" );
         my @packages = grep { $_ !~ /^[.]{1,2}$/ } readdir($dh);
         @packages = map { "$default_package_directory/$case/$_" } @packages;
-        closedir($dh) or croak;
+        closedir($dh);
         $test_cases_and_packages{$case} = \@packages;
     }
 }
