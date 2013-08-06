@@ -1342,6 +1342,7 @@ use 5.010001;
         if ( not defined($start) ) {
             $start = 0;
         }
+        my $do_delete = 1;
 
         tie( my @contents, 'Tie::File', $self->{content_file} );
 
@@ -1356,15 +1357,16 @@ use 5.010001;
         # more than one package, so we just remove the pkginsts
         if ( $pkgmap_entry->is_directory() ) {
             my $new_pkgmap_entry = Package::Entry->new_from_line( $contents[$idx], 'contents' );
-            $new_pkgmap_entry->remove_package_owner( $pkgmap_entry->{packages} );
-            $contents[$idx] = $new_pkgmap_entry->as_contents_line();
-
+            $new_pkgmap_entry->remove_package_owners( $pkgmap_entry->{packages} );
+	    if (@{$new_pkgmap_entry->{packages}}) {
+		$contents[$idx] = $new_pkgmap_entry->as_contents_line();
+		$do_delete = 0;
+	    }
         }
-        else {
-            #  we shift the array by one to make room for our new file
-            if ( $idx <= $#contents ) {
-                splice( @contents, $idx, 1 );
-            }
+
+	if ($do_delete and $idx <= $#contents) {
+            #  we remove the element from the contents file
+            splice( @contents, $idx, 1 );
         }
         untie(@contents);
 
