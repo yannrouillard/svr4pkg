@@ -45,11 +45,14 @@ use warnings;
 # will be installed and removed
 #
 
+# Create a temporary directory to use as a root file system
 sub create_playground {
     my $playground_path = File::Temp->newdir();
     return ($playground_path);
 }
 
+# Clean the temporary directory either entirely ('full' mode)
+# or only the subfiles and directories ('reset' mode)
 sub clean_playground {
     my ( $playground_path, $mode ) = @_;
     my $keep_root = $mode eq 'reset' ? 1 : 0;
@@ -191,6 +194,7 @@ sub perform_operation {
     push( @options, ( '-R', $playground_path ) );
 
     if ( $mode eq 'native' ) {
+        # Quiet mode
         push( @options, '-n' );
     }
     if ( $operation eq 'install' ) {
@@ -205,6 +209,7 @@ sub perform_operation {
     system( $command, @options, $pkginst );
 }
 
+# Play the given scenario
 sub play_scenario {
     my ( $playground_path, $scenario, $package, $mode ) = @_;
     my $result = {};
@@ -234,6 +239,10 @@ if (@ARGV) {
 }
 else {
 
+    # Otherwise we just use the packages in the $default_package_directory
+    # The structure is:
+    # Each sub-directory is named after the kind of packages it contains
+    # e.g:  $default_package_directory/SimplePackage/Package1.pkg
     opendir( my $dh, $default_package_directory );
     my @test_cases = grep { $_ !~ /^[.]{1,2}$/ } readdir($dh);
     closedir($dh);
@@ -253,6 +262,11 @@ foreach my $test_case ( keys(%test_cases_and_packages) ) {
 
     my $packages_list = $test_cases_and_packages{$test_case};
     foreach my $package ( @{$packages_list} ) {
+
+        # Foreach package we play the list of actions specified in scenario,
+	# First we the native tools then with svr4pkg
+	# We register the state of the root system after each and we compare
+	# them after
 
         clean_playground( $playground_path, 'reset' );
         my $native_results = play_scenario( $playground_path, \@scenario, $package, 'native' );
