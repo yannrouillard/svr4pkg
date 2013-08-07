@@ -67,52 +67,51 @@ sub read_into_array {
     my ( $filename, $options ) = @_;
     my @array;
 
-    open(my $fh, '<', $filename) or croak("ERROR: can't open $filename");
+    open( my $fh, '<', $filename ) or croak("ERROR: can't open $filename");
     @array = <$fh>;
     chomp(@array);
     close($fh) or croak("ERROR: can't close $filename");
 
     if ( $options->{exclude} ) {
-	# Let's create one big regex
-	my $exclude_re = join('|', @{$options->{exclude}});
-	@array = grep { $_ !~ $exclude_re } @array;
+
+        # Let's create one big regex
+        my $exclude_re = join( '|', @{ $options->{exclude} } );
+        @array = grep { $_ !~ $exclude_re } @array;
     }
     if ( $options->{sorted} ) {
         @array = sort(@array);
     }
 
-    return (\@array);
+    return ( \@array );
 }
-
 
 sub cksum_file {
     my ($filename) = @_;
     my $cksum;
 
     my $cksum_output = `/usr/bin/cksum $filename 2>/dev/null`;
-    $cksum = (split(/\s+/, $cksum_output, 2))[0];
+    $cksum = ( split( /\s+/, $cksum_output, 2 ) )[0];
 
     return ($cksum);
 }
 
-
 # We will not not compare the following files or directories
 my @excluded_files_or_directory = (
-    qr{/var/sadm/pkg/[^/]+/save}x,           # package spool save directory
-    qr{/var/sadm/install/[.]door}x,          # various files...
-    qr{/var/sadm/install/[.]lockfile}x,      # ...used by...
-    qr{/var/sadm/install/[.]pkg[.]lock}x,    # ...native pkg tools...
-    qr{/var/sadm/install/admin}x,            # ...that are...
-    qr{/var/sadm/install/pkglog}x,           # ...not used...
-    qr{/var/sadm/install/logs}x,             # ...by...
-    qr{/var/sadm/install/gz-only-packages}x, # ...svr4pkg
+    qr{/var/sadm/pkg/[^/]+/save}x,              # package spool save directory
+    qr{/var/sadm/install/[.]door}x,             # various files...
+    qr{/var/sadm/install/[.]lockfile}x,         # ...used by...
+    qr{/var/sadm/install/[.]pkg[.]lock}x,       # ...native pkg tools...
+    qr{/var/sadm/install/admin}x,               # ...that are...
+    qr{/var/sadm/install/pkglog}x,              # ...not used...
+    qr{/var/sadm/install/logs}x,                # ...by...
+    qr{/var/sadm/install/gz-only-packages}x,    # ...svr4pkg
 );
 
 # We will not compare this parameters of the pkginfo files
 my @pkginfo_exclusions = (
-    qr{^OAMBASE=}, # I don't know what it is
-    qr{^PATH=},    # We maintain a different PATH to include our binaries
-    qr{^PKGSAV},   # We don't create a package spool save directory
+    qr{^OAMBASE=},                              # I don't know what it is
+    qr{^PATH=},                                 # We maintain a different PATH to include our binaries
+    qr{^PKGSAV},                                # We don't create a package spool save directory
 );
 
 # This function store the state of the root file system used to install
@@ -120,48 +119,59 @@ my @pkginfo_exclusions = (
 # /var/sadm/install/contents...) and excluding the files or directories
 # not relevant.
 sub snapshot_playground {
-    my ( $playground_path ) = @_;
+    my ($playground_path) = @_;
     my $snapshot = {
-        'file listing'   => {},
-	'file content'   => {},
-	'contents file'  => [],
-	'pkginfo files'  => {},
+        'file listing'  => {},
+        'file content'  => {},
+        'contents file' => [],
+        'pkginfo files' => {},
     };
 
     my $store_sub = sub {
         my $realpath = $File::Find::name;
-	my $fullname = $realpath;
-	$fullname =~ s{^$playground_path}{};
+        my $fullname = $realpath;
+        $fullname =~ s{^$playground_path}{};
         my $basename = $_;
 
         # we don't store some special files or directories
-	foreach my $file_pattern (@excluded_files_or_directory) {
+        foreach my $file_pattern (@excluded_files_or_directory) {
             if ( $fullname =~ $file_pattern ) {
+
                 # We ignore directories and don't enter them either
                 if ( -d "$realpath" ) {
-		    $File::Find::prune = 1;
-	        }
+                    $File::Find::prune = 1;
+                }
                 return;
             }
         }
 
-	# We register the list of files, the content of files (through a simple checksum)
-	# and some special files whose contents is linked to the package installation or removal
-	# (e.g. pkginfo, /var/sadm/install/contents...)
+        # We register the list of files, the content of files (through a simple checksum)
+        # and some special files whose contents is linked to the package installation or removal
+        # (e.g. pkginfo, /var/sadm/install/contents...)
         $snapshot->{'file listing'}{$fullname} = 1;
-	given ($fullname) {
-            when ( '/var/sadm/install/contents' ) {
-                $snapshot->{'contents file'} = read_into_array($realpath, { exclude => [ qr{^#} ] });
-	    }
-	    when ( qr{/var/sadm/pkg/([^/]+)/pkginfo}x ) {
-                $snapshot->{'pkginfo files'}{$1} = read_into_array($realpath, { sorted => 1, exclude => \@pkginfo_exclusions });
-	    }
+        given ($fullname) {
+            when ('/var/sadm/install/contents') {
+                $snapshot->{'contents file'} = read_into_array(
+                    $realpath,
+                    {
+                        exclude => [qr{^#}]
+                    }
+                );
+            }
+            when (qr{/var/sadm/pkg/([^/]+)/pkginfo}x) {
+                $snapshot->{'pkginfo files'}{$1} = read_into_array(
+                    $realpath,
+                    {
+                        sorted => 1, exclude => \@pkginfo_exclusions
+                    }
+                );
+            }
             default {
                 if ( -f "$realpath" ) {
-		    $snapshot->{'file content'}{$fullname} = cksum_file($fullname);
-		}
-	    }
-	}
+                    $snapshot->{'file content'}{$fullname} = cksum_file($fullname);
+                }
+            }
+        }
     };
 
     find( $store_sub, $playground_path );
@@ -194,6 +204,7 @@ sub perform_operation {
     push( @options, ( '-R', $playground_path ) );
 
     if ( $mode eq 'native' ) {
+
         # Quiet mode
         push( @options, '-n' );
     }
@@ -206,8 +217,8 @@ sub perform_operation {
     # always updated after package installation or removal
     local $ENV{SUNW_PKG_SERVERMODE} = 'run_once';
 
-    my $full_command = join(' ', ($command, @options, $pkginst));
-    system( "$full_command >/dev/null 2>&1" );
+    my $full_command = join( ' ', ( $command, @options, $pkginst ) );
+    system("$full_command >/dev/null 2>&1");
 }
 
 # Play the given scenario
@@ -265,9 +276,9 @@ foreach my $test_case ( keys(%test_cases_and_packages) ) {
     foreach my $package ( @{$packages_list} ) {
 
         # Foreach package we play the list of actions specified in scenario,
-	# First we the native tools then with svr4pkg
-	# We register the state of the root system after each and we compare
-	# them after
+        # First we the native tools then with svr4pkg
+        # We register the state of the root system after each and we compare
+        # them after
 
         clean_playground( $playground_path, 'reset' );
         my $native_results = play_scenario( $playground_path, \@scenario, $package, 'native' );
