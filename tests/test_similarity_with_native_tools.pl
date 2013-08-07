@@ -123,6 +123,11 @@ sub perform_operation {
         push( @options, ( '-d', $device ) );
     }
 
+    # This environnement variable tells the pkgserver that it musts
+    # quit after. Otherwise the /var/sadm/install/contents is not
+    # always updated after package installation or removal
+    local $ENV{SUNW_PKG_SERVERMODE} = 'run_once';
+
     system( $command, @options, $pkginst );
 }
 
