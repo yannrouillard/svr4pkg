@@ -206,7 +206,8 @@ sub perform_operation {
     # always updated after package installation or removal
     local $ENV{SUNW_PKG_SERVERMODE} = 'run_once';
 
-    system( $command, @options, $pkginst );
+    my $full_command = join(' ', ($command, @options, $pkginst));
+    system( "$full_command >/dev/null 2>&1" );
 }
 
 # Play the given scenario
