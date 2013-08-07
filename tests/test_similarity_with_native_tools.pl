@@ -30,6 +30,7 @@ use File::Path qw(remove_tree);
 use File::Temp;
 use File::Find qw(find);
 use List::Util qw(first);
+use 5.010001;
 
 use strict;
 use warnings;
@@ -55,36 +56,109 @@ sub clean_playground {
     remove_tree( $playground_path, { keep_root => $keep_root } );
 }
 
-my @excluded_sadm_install_files = qw(
-  .door .lockfile .pkg.lock .pkg.lock.client admin logs pkglog gz-only-packages);
+# Put the content of the given file into an array
+# The returned array can be sorted (options 'sorted' => 1)
+# and it can be filtered
+# (options 'excluded' => [ list of regexes to exclude ])
+sub read_into_array {
+    my ( $filename, $options ) = @_;
+    my @array;
 
+    open(my $fh, '<', $filename) or croak("ERROR: can't open $filename");
+    @array = <$fh>;
+    chomp(@array);
+    close($fh) or croak("ERROR: can't close $filename");
+
+    if ( $options->{exclude} ) {
+	# Let's create one big regex
+	my $exclude_re = join('|', @{$options->{exclude}});
+	@array = grep { $_ !~ $exclude_re } @array;
+    }
+    if ( $options->{sorted} ) {
+        @array = sort(@array);
+    }
+
+    return (\@array);
+}
+
+
+sub cksum_file {
+    my ($filename) = @_;
+    my $cksum;
+
+    my $cksum_output = `/usr/bin/cksum $filename 2>/dev/null`;
+    $cksum = (split(/\s+/, $cksum_output, 2))[0];
+
+    return ($cksum);
+}
+
+
+# We will not not compare the following files or directories
+my @excluded_files_or_directory = (
+    qr{/var/sadm/pkg/[^/]+/save}x,           # package spool save directory
+    qr{/var/sadm/install/[.]door}x,          # various files...
+    qr{/var/sadm/install/[.]lockfile}x,      # ...used by...
+    qr{/var/sadm/install/[.]pkg[.]lock}x,    # ...native pkg tools...
+    qr{/var/sadm/install/admin}x,            # ...that are...
+    qr{/var/sadm/install/pkglog}x,           # ...not used...
+    qr{/var/sadm/install/logs}x,             # ...by...
+    qr{/var/sadm/install/gz-only-packages}x, # ...svr4pkg
+);
+
+# We will not compare this parameters of the pkginfo files
+my @pkginfo_exclusions = (
+    qr{^OAMBASE=}, # I don't know what it is
+    qr{^PATH=},    # We maintain a different PATH to include our binaries
+    qr{^PKGSAV},   # We don't create a package spool save directory
+);
+
+# This function store the state of the root file system used to install
+# the package, taking into account some special files (pkginfo,
+# /var/sadm/install/contents...) and excluding the files or directories
+# not relevant.
 sub snapshot_playground {
-    my ($playground_path) = @_;
-    my $snapshot = {};
+    my ( $playground_path ) = @_;
+    my $snapshot = {
+        'file listing'   => {},
+	'file content'   => {},
+	'contents file'  => [],
+	'pkginfo files'  => {},
+    };
 
-    # We just store the directory listing for now
-    # That will be improved in the future
     my $store_sub = sub {
-        my $fullname = $File::Find::name;
+        my $realpath = $File::Find::name;
+	my $fullname = $realpath;
+	$fullname =~ s{^$playground_path}{};
         my $basename = $_;
-        if ( not( exists( $snapshot->{'listing'} ) ) ) {
-            $snapshot->{listing} = {};
+
+        # we don't store some special files or directories
+	foreach my $file_pattern (@excluded_files_or_directory) {
+            if ( $fullname =~ $file_pattern ) {
+                # We ignore directories and don't enter them either
+                if ( -d "$realpath" ) {
+		    $File::Find::prune = 1;
+	        }
+                return;
+            }
         }
 
-        # we don't store the package spool directory
-        if ( $fullname =~ m{^$playground_path/var/sadm/pkg/[^/]+/save$}x ) {
-            $File::Find::prune = 1;
-            return;
-        }
-        if ( $fullname =~ m{^$playground_path/var/sadm/install/}x
-            and first { $_ eq $basename } @excluded_sadm_install_files )
-        {
-            if ( -d $fullname ) {
-                $File::Find::prune = 1;
-            }
-            return;
-        }
-        $snapshot->{listing}{$fullname} = 1;
+	# We register the list of files, the content of files (through a simple checksum)
+	# and some special files whose contents is linked to the package installation or removal
+	# (e.g. pkginfo, /var/sadm/install/contents...)
+        $snapshot->{'file listing'}{$fullname} = 1;
+	given ($fullname) {
+            when ( '/var/sadm/install/contents' ) {
+                $snapshot->{'contents file'} = read_into_array($realpath, { exclude => [ qr{^#} ] });
+	    }
+	    when ( qr{/var/sadm/pkg/([^/]+)/pkginfo}x ) {
+                $snapshot->{'pkginfo files'}{$1} = read_into_array($realpath, { sorted => 1, exclude => \@pkginfo_exclusions });
+	    }
+            default {
+                if ( -f "$realpath" ) {
+		    $snapshot->{'file content'}{$fullname} = cksum_file($fullname);
+		}
+	    }
+	}
     };
 
     find( $store_sub, $playground_path );
