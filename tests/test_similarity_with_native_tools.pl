@@ -52,7 +52,7 @@ sub create_playground {
 
 sub clean_playground {
     my ( $playground_path, $mode ) = @_;
-    my $keep_root = $mode eq 'reset' ? 0 : 1;
+    my $keep_root = $mode eq 'reset' ? 1 : 0;
     remove_tree( $playground_path, { keep_root => $keep_root } );
 }
 
