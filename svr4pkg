@@ -527,6 +527,7 @@ use 5.010001;
         $self->{pkginfo}{PKGINST}       = $pkginst;
         $self->{pkginfo}{INST_DATADIR}  = $path;
         $self->{pkginfo}{PKG_CLIENT_OS} = 'Solaris';
+        $self->{pkginfo}{TZ}            = $ENV{TZ};
         if ( not exists( $self->{pkginfo}{BASEDIR} ) ) {
             $self->{pkginfo}{BASEDIR} = '/';
         }
