@@ -133,10 +133,23 @@ sub snapshot_playground {
         $fullname =~ s{^$playground_path}{};
         my $basename = $_;
 
-        # we don't store some special files or directories
+        # Some files are special and deserve a special treatment
+        # (e.g. pkginfo, /var/sadm/install/contents...)
+        if ($fullname eq '/var/sadm/install/contents') {
+            $snapshot->{'contents file'} = read_into_array(
+                $realpath, { exclude => [qr{^#}] });
+            return;
+        }
+        if ($fullname =~ qr{/var/sadm/pkg/([^/]+)/pkginfo}x) {
+            $snapshot->{'pkginfo files'}{$1} = read_into_array(
+                $realpath, { sorted => 1, exclude => \@pkginfo_exclusions });
+            return;
+        }
+
+        # we exclude from the comparison some files or directories that will
+        # always be different
         foreach my $file_pattern (@excluded_files_or_directory) {
             if ( $fullname =~ $file_pattern ) {
-
                 # We ignore directories and don't enter them either
                 if ( -d "$realpath" ) {
                     $File::Find::prune = 1;
@@ -146,31 +159,9 @@ sub snapshot_playground {
         }
 
         # We register the list of files, the content of files (through a simple checksum)
-        # and some special files whose contents is linked to the package installation or removal
-        # (e.g. pkginfo, /var/sadm/install/contents...)
         $snapshot->{'file listing'}{$fullname} = 1;
-        given ($fullname) {
-            when ('/var/sadm/install/contents') {
-                $snapshot->{'contents file'} = read_into_array(
-                    $realpath,
-                    {
-                        exclude => [qr{^#}]
-                    }
-                );
-            }
-            when (qr{/var/sadm/pkg/([^/]+)/pkginfo}x) {
-                $snapshot->{'pkginfo files'}{$1} = read_into_array(
-                    $realpath,
-                    {
-                        sorted => 1, exclude => \@pkginfo_exclusions
-                    }
-                );
-            }
-            default {
-                if ( -f "$realpath" ) {
-                    $snapshot->{'file content'}{$fullname} = cksum_file($fullname);
-                }
-            }
+        if ( -f "$realpath" ) {
+            $snapshot->{'file content'}{$fullname} = cksum_file($fullname);
         }
     };
 
