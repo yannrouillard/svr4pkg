@@ -1686,20 +1686,20 @@ sub rm_cmd {
 
     my ( $package_manager, $options, @arguments ) = @_;
 
-    if (@arguments) {
-        my @packages_list;
-        foreach my $pkginst (@arguments) {
-            my $package = $package_manager->get_package( $pkginst );
-            if ( not defined($package) ) {
-                print STDERR "ERROR: no package associated with <$pkginst>\n";
-                exit(1);
-            }
-            push( @packages_list, $package );
-        }
+    return if (not @arguments);
 
-        foreach my $package (@packages_list) {
-            $package_manager->remove_package( $package, '/' );
+    my @packages_list;
+    foreach my $pkginst (@arguments) {
+        my $package = $package_manager->get_package( $pkginst );
+        if ( not defined($package) ) {
+            print STDERR "ERROR: no package associated with <$pkginst>\n";
+            exit(1);
         }
+        push( @packages_list, $package );
+    }
+
+    foreach my $package (@packages_list) {
+        $package_manager->remove_package( $package, '/' );
     }
 }
 
@@ -1715,11 +1715,11 @@ sub param_cmd {
 
     my ( $package_manager, $options, @arguments ) = @_;
 
-    if (@arguments) {
-        my $pkginst = shift(@arguments);
-        my $package = $package_manager->get_package( $pkginst, $options->{device} );
-        print join( "\n", map { $package->{pkginfo}->{$_} } @arguments ) . "\n";
-    }
+    return if (not @arguments);
+
+    my $pkginst = shift(@arguments);
+    my $package = $package_manager->get_package( $pkginst, $options->{device} );
+    print join( "\n", map { $package->{pkginfo}->{$_} } @arguments ) . "\n";
 }
 
 ## pkgchk command ######################################################
@@ -1774,21 +1774,21 @@ sub installf_cmd {
 
     my ( $package_manager, $options, @arguments ) = @_;
 
-    if ( @arguments >= MIN_FIELDS_COUNT ) {
-        my ( $pkginst, $pathname, $ftype ) = @arguments[ 0 .. MIN_FIELDS_COUNT - 1 ];
-        my %fields = { 'class' => $options->{class} };
+    return if ( @arguments < MIN_FIELDS_COUNT );
 
-        if ( @arguments >= MAX_FIELDS_COUNT ) {
-            $fields{ 'major', 'minor', 'mode', 'owner', 'group' } =
-              @arguments[ MIN_FIELDS_COUNT .. MAX_FIELDS_COUNT - 1 ];
-        }
-        elsif ( @arguments > MIN_FIELDS_COUNT ) {
-            $fields{ 'mode', 'owner', 'group' } = @arguments[ MIN_FIELDS_COUNT .. $#arguments ];
-        }
+    my ( $pkginst, $pathname, $ftype ) = @arguments[ 0 .. MIN_FIELDS_COUNT - 1 ];
+    my %fields = { 'class' => $options->{class} };
 
-        my $pkgmap_entry = Package::Entry->new_from_file( $pathname, \%fields, $pkginst );
-        $package_manager->register_file($pkgmap_entry);
+    if ( @arguments >= MAX_FIELDS_COUNT ) {
+        $fields{ 'major', 'minor', 'mode', 'owner', 'group' } =
+          @arguments[ MIN_FIELDS_COUNT .. MAX_FIELDS_COUNT - 1 ];
     }
+    elsif ( @arguments > MIN_FIELDS_COUNT ) {
+        $fields{ 'mode', 'owner', 'group' } = @arguments[ MIN_FIELDS_COUNT .. $#arguments ];
+    }
+
+    my $pkgmap_entry = Package::Entry->new_from_file( $pathname, \%fields, $pkginst );
+    $package_manager->register_file($pkgmap_entry);
 }
 
 ## removef_cmd command ######################################################
@@ -1800,16 +1800,16 @@ sub removef_cmd {
 
     my ( $package_manager, $options, @arguments ) = @_;
 
-    if ( @arguments > 1 ) {
-        my $pkginst         = shift(@arguments);
-        my @pathnames       = sort(@arguments);
-        my $package_entries = $package_manager->list_installed_files($pkginst);
+    return if ( @arguments <= 1 );
 
-        foreach my $pathname (@pathnames) {
-            my $pkgmap_entry = first { $_->{filename} eq $pathname } @{$package_entries};
-            next if ( not defined($pkgmap_entry) );
-            $package_manager->unregister_file( $pkgmap_entry, $pkginst );
-        }
+    my $pkginst         = shift(@arguments);
+    my @pathnames       = sort(@arguments);
+    my $package_entries = $package_manager->list_installed_files($pkginst);
+
+    foreach my $pathname (@pathnames) {
+        my $pkgmap_entry = first { $_->{filename} eq $pathname } @{$package_entries};
+        next if ( not defined($pkgmap_entry) );
+        $package_manager->unregister_file( $pkgmap_entry, $pkginst );
     }
 }
 
