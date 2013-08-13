@@ -510,6 +510,8 @@ use 5.010001;
           ? $options->{package_entries}
           : $self->_load_pkgmap();
 
+        $self->{dependencies} = $self->_load_depend();
+
         if ( not defined( $self->{pkgmap} ) ) {
             return;
         }
@@ -891,6 +893,36 @@ use 5.010001;
     }
 
     #
+    # Purpose:    Parse the depend file located in the package and
+    #             initialize the list of package entries.
+    #             At the end of this method, the 'pkgmap' internal
+    #             attr is properly initialized as a list of
+    #             Package::Entry objects.
+    #
+    # Parameters:
+    #   $pkgmap_file - the path of the pkgmap file
+    #
+    sub _load_depend {
+        my $self = shift;
+        my %dependencies;
+        my $depend_file = catfile( $self->{path}, $self->{pkginst}, 'install/depend' );
+
+        if ( -r $depend_file ) {
+            open( my $fh, '<', $depend_file )
+              or croak("ERROR: can't open $depend_file");
+            while ( my $line = <$fh> ) {
+                my ($type, $pkginst, $name) = ($line =~ /([PIR]) (\S+) (.*)/);
+                next if not (defined ($type));
+                push (@{$dependencies{$type}}, $pkginst);
+            }
+            close($fh);
+        }
+
+        return ( \%dependencies );
+    }
+
+
+    #
     # Purpose:    Update various information about the current
     #             package according to the list of files owned
     #             by the package.
@@ -1111,8 +1143,9 @@ use 5.010001;
     use constant NATIVE_ACTION_SCRIPTS_LOCATION => '/usr/sadm/install/scripts/';
 
     # Packager::Manager error codes
-    use constant SUCCESS        => 0;
-    use constant CONFLICT_ERROR => 1;
+    use constant SUCCESS          => 0;
+    use constant CONFLICT_ERROR   => 1;
+    use constant DEPENDENCY_ERROR => 2;
 
     my @relocatable_binaries = qw(pkgparam pkginfo installf removef);
 
@@ -1219,9 +1252,24 @@ use 5.010001;
 
         my ($pkg_name) = ( $result =~ /Transferring <([^>]+)> package instance/ );
 
+        if (defined ($pkg_name) and $result =~ /no permission to overwrite existing path/) {
+            remove_tree (catfile($self->{spool_directory}, $pkg_name));
+            `$command 2>&1`;
+        }
+
         return if ( not defined($pkg_name) );
         return ($pkg_name);
     }
+
+
+    #
+    # Purpose:    Check if the given package is installed
+    #
+    sub is_package_installed {
+        my ($self, $pkginst) = shift;
+        return ( -e catfile($self->{pkg_directory}, $pkginst, 'pkginfo') );
+    }
+
 
     #
     # Purpose:    Returns the list of svr4 package names that
@@ -1385,6 +1433,16 @@ use 5.010001;
     sub install_package {
         my ( $self, $package, $options ) = @_;
         my $dest = $self->{root_path};
+
+        my @missing_dependencies;
+        foreach my $dependency (@{$package->{dependencies}{'P'}}) {
+            if (not $self->is_package_installed($dependency)) {
+                push (@missing_dependencies, $dependency);
+            }
+        }
+        if (@missing_dependencies) {
+            return (DEPENDENCY_ERROR, \@missing_dependencies);
+        }
 
         if ( not ($options->{force}) ) {
             my $conflicts = $self->_check_file_conflict($package, $dest);
@@ -1658,6 +1716,13 @@ sub add_cmd {
     my $pkginst = shift(@arguments);
     my $package = $package_manager->get_package( $pkginst, $options->{device} );
     my ($ret, $info) = $package_manager->install_package( $package );
+
+    if ($ret == Package::Manager::DEPENDENCY_ERROR) {
+    	print ("The following packages are not installed and are required to install $pkginst:\n");
+    	# In that case, $info is a reference to a list of missing required packages
+    	print (join("\n", map { "\t$_" } @{$info}) . "\n\n");
+        return;
+    }
 
     if ($ret == Package::Manager::CONFLICT_ERROR) {
     	print ("The following files are already installed on the system:\n");
