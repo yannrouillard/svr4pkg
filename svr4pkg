@@ -1116,6 +1116,10 @@ use 5.010001;
 
     use constant NATIVE_ACTION_SCRIPTS_LOCATION => '/usr/sadm/install/scripts/';
 
+    # Packager::Manager error codes
+    use constant SUCCESS        => 0;
+    use constant CONFLICT_ERROR => 1;
+
     my @relocatable_binaries = qw(pkgparam pkginfo installf removef);
 
     ## Public methods
@@ -1380,10 +1384,20 @@ use 5.010001;
     # Parameters:
     #   $package - a Package object whose content must be
     #              installed on the server.
+    #   $options - a hash of various options:
+    #               - force => if 1, force the package installation
+    #                          even if there are some file conflict
     #
     sub install_package {
-        my ( $self, $package ) = @_;
+        my ( $self, $package, $options ) = @_;
         my $dest = $self->{root_path};
+
+        if ( not ($options->{force}) ) {
+            my $conflicts = $self->_check_file_conflict($package, $dest);
+            if (@{$conflicts}) {
+                return (CONFLICT_ERROR, $conflicts);
+            }
+        }
 
         $self->_verbose('## Registering the package');
         $self->_register_package($package);
@@ -1499,6 +1513,39 @@ use 5.010001;
 
     }
 
+
+    #
+    # Purpose:    Check if there are existing files that conflicts
+    #             with the files of the given package
+    #             Returns the list of conflicting files.
+    #
+    # Parameters:
+    #   $package - the package that must be registered
+    #   $dest    - the root location where files are installed
+    #
+    sub _check_file_conflict {
+        my ($self, $package, $dest) = @_;
+        my @conflicts;
+
+        my $idx = 0;
+        my $filename_at_idx;
+        tie( my @contents, 'Tie::File', $self->{content_file} );
+        foreach my $pkgmap_entry ( sort ( @{$package->{pkgmap}}) ) {
+
+            ( $idx, $filename_at_idx ) = $self->_find_insert_position( \@contents, $pkgmap_entry, $idx );
+            # we check if the given path is already registered in the database,
+            # or if the file is present on the filesystem
+            if ( $filename_at_idx eq $pkgmap_entry->{filename} or
+                    -e $package->_build_path($pkgmap_entry, $dest) ) {
+                push(@conflicts, $pkgmap_entry->{filename});
+            }
+        }
+        untie(@contents);
+
+	return (\@conflicts);
+    }
+
+
     #
     # Purpose:    Find the location where the given pkgmap entry
     #             must be added in the /var/sadm/install/contents
@@ -1530,6 +1577,21 @@ use 5.010001;
     }
 
 }
+
+#############################################################################
+# Useful functions
+#############################################################################
+
+#
+# Purpose:    Determine if we are running in a interactive session
+#             Note: we should use IO::Interactive but we don't want
+#             to depend on any module
+#             Beside, we are sure that we will not use *ARGV here.
+#
+sub is_interactive {
+    return -t *STDIN && -t *STDOUT;
+}
+
 
 #############################################################################
 # Main program
@@ -1597,10 +1659,24 @@ sub add_cmd {
 
     my ( $package_manager, $options, @arguments ) = @_;
 
-    if (@arguments) {
-        my $pkginst = shift(@arguments);
-        my $package = $package_manager->get_package( $pkginst, $options->{device} );
-        $package_manager->install_package( $package, '/' );
+    return if (not @arguments);
+
+    my $pkginst = shift(@arguments);
+    my $package = $package_manager->get_package( $pkginst, $options->{device} );
+    my ($ret, $info) = $package_manager->install_package( $package );
+
+    if ($ret == Package::Manager::CONFLICT_ERROR) {
+    	print ("The following files are already installed on the system:\n");
+    	# In that case, $info is a reference to a list of conflicting files
+    	print (join("\n", map { "\t$_" } @{$info}) . "\n\n");
+
+    	if (is_interactive()) {
+	    print 'Would you like to install the package anyway (y/n) ? ';
+	    my $answer = <STDIN>;
+	    if ($answer =~ /^[Yy]$/) {
+	        ($ret, $info) = $package_manager->install_package( $package, { force => 1 } );
+	    }
+        }
     }
 }
 

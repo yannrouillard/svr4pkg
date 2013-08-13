@@ -20,6 +20,8 @@ exclude_functions = print
 # file, so we ignore these critics
 [-Modules::RequireVersionVar]
 [-Modules::ProhibitMultiplePackages]
+[-InputOutput::ProhibitExplicitStdin]
+[-InputOutput::ProhibitInteractiveTest]
 
 # I prefer to handle perl tidy on my own
 [-CodeLayout::RequireTidyCode]
