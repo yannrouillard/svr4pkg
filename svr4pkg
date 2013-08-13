@@ -229,24 +229,18 @@ use 5.010001;
     # A set of useful methods to test some properties of the file referenced
     # by the pkgmap entry
     #
-    sub is_directory { my $self = shift; return ( $self->{ftype} eq 'd' ); }
-
-    sub is_executable {
-        my $self = shift;
-        return ( $self->{ftype} eq 'f' and oct( $self->{mode} ) & EXECUTABLE_PERMISSIONS );
-    }
-
-    sub is_information_file {
-        my $self = shift;
-        return ( $self->{ftype} eq 'i' );
-    }
-    sub is_regular_file { my $self = shift; return ( $self->{ftype} eq 'f' ); }
-    sub is_symlink      { my $self = shift; return ( $self->{ftype} eq 's' ); }
-    sub is_hardlink     { my $self = shift; return ( $self->{ftype} eq 'l' ); }
-
+    sub is_directory        { my $self = shift; return ( $self->{ftype} eq 'd' ); }
+    sub is_information_file { my $self = shift; return ( $self->{ftype} eq 'i' ); }
+    sub is_regular_file     { my $self = shift; return ( $self->{ftype} eq 'f' ); }
+    sub is_symlink          { my $self = shift; return ( $self->{ftype} eq 's' ); }
+    sub is_hardlink         { my $self = shift; return ( $self->{ftype} eq 'l' ); }
     sub is_relative {
         my $self = shift;
         return ( not file_name_is_absolute( $self->{pathname} ) );
+    }
+    sub is_executable {
+        my $self = shift;
+        return ( $self->{ftype} eq 'f' and oct( $self->{mode} ) & EXECUTABLE_PERMISSIONS );
     }
 
     sub is_installation_script {
@@ -1363,13 +1357,13 @@ use 5.010001;
         if ( $pkgmap_entry->is_directory() ) {
             my $new_pkgmap_entry = Package::Entry->new_from_line( $contents[$idx], 'contents' );
             $new_pkgmap_entry->remove_package_owners( $pkgmap_entry->{packages} );
-	    if (@{$new_pkgmap_entry->{packages}}) {
-		$contents[$idx] = $new_pkgmap_entry->as_contents_line();
-		$do_delete = 0;
-	    }
+            if (@{$new_pkgmap_entry->{packages}}) {
+                $contents[$idx] = $new_pkgmap_entry->as_contents_line();
+                $do_delete = 0;
+            }
         }
 
-	if ($do_delete and $idx <= $#contents) {
+        if ($do_delete and $idx <= $#contents) {
             #  we remove the element from the contents file
             splice( @contents, $idx, 1 );
         }
