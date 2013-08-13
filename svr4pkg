@@ -1320,7 +1320,7 @@ use 5.010001;
             {
 
                 my $package_entry = Package::Entry->new_from_line( $line, 'contents' );
-		$package_entry->set_package_owners( $pkginst );
+                $package_entry->set_package_owners( $pkginst );
                 push( @pkgmap_entries, $package_entry );
             }
         }
@@ -1648,7 +1648,6 @@ sub is_interactive {
     return -t *STDIN && -t *STDOUT;
 }
 
-
 #############################################################################
 # Main program
 #############################################################################
@@ -1656,6 +1655,7 @@ sub is_interactive {
 use Getopt::Long;
 use POSIX qw(strftime);
 use File::Basename qw(basename dirname);
+
 
 # Default configuration for the package manager
 my %package_manager_config = (
@@ -1734,11 +1734,11 @@ sub add_cmd {
     	print (join("\n", map { "\t$_" } @{$info}) . "\n\n");
 
     	if (is_interactive()) {
-	    print 'Would you like to install the package anyway (y/n) ? ';
-	    my $answer = <STDIN>;
-	    if ($answer =~ /^[Yy]$/) {
-	        ($ret, $info) = $package_manager->install_package( $package, { force => 1 } );
-	    }
+            print 'Would you like to install the package anyway (y/n) ? ';
+            my $answer = <STDIN>;
+            if ($answer =~ /^[Yy]$/) {
+                ($ret, $info) = $package_manager->install_package( $package, { force => 1 } );
+            }
         }
     }
 }
