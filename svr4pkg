@@ -1186,6 +1186,10 @@ use 5.010001;
             $self->{path_mappings}{$path} = '';
         }
 
+        # We make sure some standard directories will be present for our next operations
+        make_path ( $self->{pkg_directory} );
+        make_path ( dirname($self->{content_file}) );
+
         return ( bless( $self, $class ) );
     }
 
