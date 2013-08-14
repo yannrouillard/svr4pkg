@@ -1465,7 +1465,8 @@ use 5.010001;
         $package->execute_procedure_script('preinstall');
 
         $self->_verbose('## Installing package files');
-        $package->install_files( $dest, $self->{action_scripts_location} );
+        my $action_scripts_location = catfile($self->{root_path}, $self->{action_scripts_location});
+        $package->install_files( $dest, $action_scripts_location );
 
         $self->_verbose('## Executing postinstall script');
         $package->execute_procedure_script('postinstall');
