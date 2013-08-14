@@ -1270,7 +1270,7 @@ use 5.010001;
     # Purpose:    Check if the given package is installed
     #
     sub is_package_installed {
-        my ($self, $pkginst) = shift;
+        my ($self, $pkginst) = @_;
         return ( -e catfile($self->{pkg_directory}, $pkginst, 'pkginfo') );
     }
 
