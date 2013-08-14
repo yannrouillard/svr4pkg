@@ -105,6 +105,12 @@ my @excluded_files_or_directory = (
     qr{/var/sadm/install/pkglog}x,              # ...not used...
     qr{/var/sadm/install/logs}x,                # ...by...
     qr{/var/sadm/install/gz-only-packages}x,    # ...svr4pkg
+    qr{/usr/sadm$}x,
+    qr{/usr$}x,
+);
+
+my %path_mappings = (
+    '/usr/sadm/install' => '/var/sadm/install',
 );
 
 # We will not compare this parameters of the pkginfo files
@@ -149,19 +155,19 @@ sub snapshot_playground {
         # we exclude from the comparison some files or directories that will
         # always be different
         foreach my $file_pattern (@excluded_files_or_directory) {
-            if ( $fullname =~ $file_pattern ) {
-                # We ignore directories and don't enter them either
-                if ( -d "$realpath" ) {
-                    $File::Find::prune = 1;
-                }
-                return;
-            }
+            return if ( $fullname =~ $file_pattern );
+        }
+
+        # We transform some path that are always different between native and svr4pkg
+        foreach my $path ( keys( %path_mappings ) ) {
+            my $new_path = $path_mappings{$path};
+            $fullname =~ s/^$path/$new_path/;
         }
 
         # We register the list of files, the content of files (through a simple checksum)
         $snapshot->{'file listing'}{$fullname} = 1;
         if ( -f "$realpath" ) {
-            $snapshot->{'file content'}{$fullname} = cksum_file($fullname);
+            $snapshot->{'file content'}{$fullname} = cksum_file($realpath);
         }
     };
 
