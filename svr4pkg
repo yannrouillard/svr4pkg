@@ -1205,7 +1205,7 @@ use 5.010001;
     sub get_package {
         my ( $self, $pkginst, $device ) = @_;
         my $package_entries;
-        my $options = { path_mapping => $self->{path_mapping} };
+        my $options = { path_mappings => $self->{path_mappings} };
 
         if (not defined($device)) {
 	    $device = $self->{pkg_directory};
