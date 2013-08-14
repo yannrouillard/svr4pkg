@@ -1455,6 +1455,8 @@ use 5.010001;
             }
         }
 
+        $self->_verbose('## Installing package ' . $package->{pkginst} . "\n");
+
         $self->_verbose('## Registering the package');
         $self->_register_package($package);
 
@@ -1484,6 +1486,8 @@ use 5.010001;
     sub remove_package {
         my ( $self, $package ) = @_;
         my $dest = $self->{root_path};
+
+        $self->_verbose('## Removing package ' . $package->{pkginst} . "\n");
 
         $self->_verbose('## Executing preremove script');
         $package->execute_procedure_script('preremove');
