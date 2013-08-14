@@ -185,6 +185,7 @@ sub perform_operation {
 
     my $device = $package;
     my $pkginst = basename( $package, '.pkg' );
+    $pkginst =~ s/\d+-//;
 
     my $command;
     my @options;
@@ -220,12 +221,21 @@ sub perform_operation {
 
 # Play the given scenario
 sub play_scenario {
-    my ( $playground_path, $scenario, $package, $mode ) = @_;
+    my ( $playground_path, $scenario, $packages_list, $mode ) = @_;
     my $result = {};
 
     foreach my $action ( @{$scenario} ) {
-        perform_operation( $playground_path, $action, $package, $mode );
-        $result->{$action} = snapshot_playground($playground_path);
+        my ($real_action, $modifier) = split(/\//, $action);
+        my @real_packages_list;
+        if (defined($modifier) and $modifier eq 'reverse') {
+            @real_packages_list = reverse(@{$packages_list});
+        } else {
+            @real_packages_list = @{$packages_list};
+        }
+        foreach my $package (@real_packages_list) {
+            perform_operation( $playground_path, $real_action, $package, $mode );
+        }
+        $result->{$real_action} = snapshot_playground($playground_path);
     }
 
     return ($result);
@@ -235,7 +245,7 @@ sub play_scenario {
 # Main functions
 #############################################################################
 
-my @scenario                  = qw(install remove);
+my @scenario                  = qw(install remove/reverse);
 my $default_package_directory = 'tests/packages';
 
 my %test_cases_and_packages;
@@ -259,7 +269,7 @@ else {
     foreach my $case (@test_cases) {
         opendir( my $dh, "$default_package_directory/$case" );
         my @packages = grep { $_ !~ /^[.]{1,2}$/ } readdir($dh);
-        @packages = map { "$default_package_directory/$case/$_" } @packages;
+        @packages = sort (map { "$default_package_directory/$case/$_" } @packages);
         closedir($dh);
         $test_cases_and_packages{$case} = \@packages;
     }
@@ -270,26 +280,25 @@ my $playground_path = create_playground();
 foreach my $test_case ( keys(%test_cases_and_packages) ) {
 
     my $packages_list = $test_cases_and_packages{$test_case};
-    foreach my $package ( @{$packages_list} ) {
 
-        # Foreach package we play the list of actions specified in scenario,
-        # First we the native tools then with svr4pkg
-        # We register the state of the root system after each and we compare
-        # them after
+    # Foreach package we play the list of actions specified in scenario,
+    # First we the native tools then with svr4pkg
+    # We register the state of the root system after each and we compare
+    # them after
 
-        clean_playground( $playground_path, 'reset' );
-        my $native_results = play_scenario( $playground_path, \@scenario, $package, 'native' );
+    clean_playground( $playground_path, 'reset' );
+    my $native_results = play_scenario( $playground_path, \@scenario, $packages_list, 'native' );
 
-        clean_playground( $playground_path, 'reset' );
-        my $svr4pkg_results = play_scenario( $playground_path, \@scenario, $package, 'svr4pkg' );
+    clean_playground( $playground_path, 'reset' );
+    my $svr4pkg_results = play_scenario( $playground_path, \@scenario, $packages_list, 'svr4pkg' );
 
-        foreach my $action (@scenario) {
-            is_deeply(
-                $svr4pkg_results->{$action},
-                $native_results->{$action},
-                "$test_case $action " . basename($package)
-            );
-        }
+    foreach my $action (@scenario) {
+        my ($real_action) = ($action =~ m/^([^\/]+)/);
+        is_deeply(
+            $svr4pkg_results->{$action},
+            $native_results->{$action},
+            "$test_case $real_action",
+        );
     }
 }
 
