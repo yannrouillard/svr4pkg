@@ -1,3 +1,5 @@
 # 80 characters are really too short,
 # my eyes can handle more !
 --maximum-line-length=120
+# Personal taste
+--cuddled-else

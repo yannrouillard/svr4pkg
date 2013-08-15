@@ -115,9 +115,9 @@ my %path_mappings = ( '/usr/sadm/install' => '/var/sadm/install', );
 
 # We will not compare this parameters of the pkginfo files
 my @pkginfo_exclusions = (
-    qr{^OAMBASE=},    # I don't know what it is
-    qr{^PATH=},       # We maintain a different PATH to include our binaries
-    qr{^PKGSAV},      # We don't create a package spool save directory
+    qr{^OAMBASE=},                              # I don't know what it is
+    qr{^PATH=},                                 # We maintain a different PATH to include our binaries
+    qr{^PKGSAV},                                # We don't create a package spool save directory
 );
 
 #############################################################################
@@ -144,14 +144,12 @@ sub snapshot_playground {
         # Some files are special and deserve a special treatment
         # (e.g. pkginfo, /var/sadm/install/contents...)
         if ( $fullname eq '/var/sadm/install/contents' ) {
-            $snapshot->{'contents file'} =
-              read_into_array( $realpath, { exclude => [qr{^#}] } );
+            $snapshot->{'contents file'} = read_into_array( $realpath, { exclude => [qr{^#}] } );
             return;
         }
         if ( $fullname =~ qr{/var/sadm/pkg/([^/]+)/pkginfo}x ) {
             $snapshot->{'pkginfo files'}{$1} =
-              read_into_array( $realpath,
-                { sorted => 1, exclude => \@pkginfo_exclusions } );
+              read_into_array( $realpath, { sorted => 1, exclude => \@pkginfo_exclusions } );
             return;
         }
 
@@ -161,13 +159,13 @@ sub snapshot_playground {
             return if ( $fullname =~ $file_pattern );
         }
 
-   # We transform some path that are always different between native and svr4pkg
+        # We transform some path that are always different between native and svr4pkg
         foreach my $path ( keys(%path_mappings) ) {
             my $new_path = $path_mappings{$path};
             $fullname =~ s/^$path/$new_path/;
         }
 
-# We register the list of files, the content of files (through a simple checksum)
+        # We register the list of files, the content of files (through a simple checksum)
         $snapshot->{'file listing'}{$fullname} = 1;
         if ( -f "$realpath" ) {
             $snapshot->{'file content'}{$fullname} = cksum_file($realpath);
@@ -196,8 +194,7 @@ sub perform_operation {
     my $pkg_operation = $operation eq 'install' ? 'add' : 'rm';
     if ( $mode eq 'native' ) {
         $command = "pkg$pkg_operation";
-    }
-    else {
+    } else {
         $command = './svr4pkg';
         push( @options, $pkg_operation );
     }
@@ -227,9 +224,7 @@ sub play_scenario {
     my ( $scenario, $mode, $playground_path, $packages_path ) = @_;
     my $result;
 
-    foreach
-      my $step ( @{ $scenario->{prerequisites} }, @{ $scenario->{steps} } )
-    {
+    foreach my $step ( @{ $scenario->{prerequisites} }, @{ $scenario->{steps} } ) {
         my $package = catfile( $packages_path, $step->{package} );
         perform_operation( $playground_path, $step->{action}, $package, $mode );
     }
@@ -288,10 +283,7 @@ sub parse_test_scenarios {
         chomp($line);
         next if ( $line =~ /^(#|\s*$)/ );
 
-        my (
-            $test_name,       $scenario_description,
-            $comparison_test, $prerequisites
-        ) = split( /\s*[|]\s*/, $line );
+        my ( $test_name, $scenario_description, $comparison_test, $prerequisites ) = split( /\s*[|]\s*/, $line );
         return if not defined($comparison_test);
 
         my $scenario_steps = parse_scenario_steps($scenario_description);
@@ -301,13 +293,9 @@ sub parse_test_scenarios {
         if ( defined($prerequisites) and $prerequisites ne '' ) {
 
             # We check wether the prerequisites are a reference to a previous scenario
-            if ( my $scenario =
-                first { $_->{name} eq $prerequisites } @test_scenarios )
-            {
-                @{$prerequisites_steps} =
-                    ( @{ $scenario->{prerequisites} }, @{ $scenario->{steps} } );
-            }
-            else {
+            if ( my $scenario = first { $_->{name} eq $prerequisites } @test_scenarios ) {
+                @{$prerequisites_steps} = ( @{ $scenario->{prerequisites} }, @{ $scenario->{steps} } );
+            } else {
                 $prerequisites_steps = parse_scenario_steps($prerequisites);
             }
         }
@@ -343,12 +331,10 @@ foreach my $scenario ( @{$test_scenarios} ) {
     # then we will compare the results of the two runs
 
     clean_playground( $playground_path, 'reset' );
-    my $native_results =
-      play_scenario( $scenario, 'native', $playground_path, $packages_path );
+    my $native_results = play_scenario( $scenario, 'native', $playground_path, $packages_path );
 
     clean_playground( $playground_path, 'reset' );
-    my $svr4pkg_results =
-      play_scenario( $scenario, 'svr4pkg', $playground_path, $packages_path );
+    my $svr4pkg_results = play_scenario( $scenario, 'svr4pkg', $playground_path, $packages_path );
 
     is_deeply( $svr4pkg_results, $native_results, $scenario->{name} );
 }

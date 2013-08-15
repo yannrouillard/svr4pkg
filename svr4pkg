@@ -153,8 +153,7 @@ use 5.010001;
         if ( $self->is_symlink() or $self->is_hardlink() ) {
             ( $self->{filename}, $self->{targetname} ) =
               split( /=/, $self->{pathname}, 2 );
-        }
-        else {
+        } else {
             $self->{filename} = $self->{pathname};
         }
 
@@ -183,7 +182,7 @@ use 5.010001;
         # initialize the attributes accordingly
         my $field_name_at = $line_format_for{$format}{$ftype};
         foreach my $index ( 0 .. $#{$field_name_at} ) {
-            $fields{ $field_name_at->[$index] } = shift (@pkgmap_values);
+            $fields{ $field_name_at->[$index] } = shift(@pkgmap_values);
         }
         if ( $format eq 'contents' ) {
             $fields{packages} = [ $fields{packages}, @pkgmap_values ];
@@ -234,10 +233,12 @@ use 5.010001;
     sub is_regular_file     { my $self = shift; return ( $self->{ftype} eq 'f' ); }
     sub is_symlink          { my $self = shift; return ( $self->{ftype} eq 's' ); }
     sub is_hardlink         { my $self = shift; return ( $self->{ftype} eq 'l' ); }
+
     sub is_relative {
         my $self = shift;
         return ( not file_name_is_absolute( $self->{pathname} ) );
     }
+
     sub is_executable {
         my $self = shift;
         return ( $self->{ftype} eq 'f' and oct( $self->{mode} ) & EXECUTABLE_PERMISSIONS );
@@ -283,16 +284,17 @@ use 5.010001;
     #               they will be listed at the end of the line.
     #
     sub as_contents_line {
-        my ( $self ) = @_;
+        my ($self) = @_;
 
         # information files are not stored in the contents file
         return if ( $self->is_information_file() );
 
         my $pkginsts = $self->{packages};
 
-        my @contents_line_fields = @{$line_format_for{'contents'}{ $self->{ftype} }};
+        my @contents_line_fields = @{ $line_format_for{'contents'}{ $self->{ftype} } };
+
         # We remove the last one, packages, because we handle it differently
-        pop (@contents_line_fields);
+        pop(@contents_line_fields);
         my $line = join( ' ', ( map ( { $self->{$_} } @contents_line_fields ), @{$pkginsts} ) );
         return ($line);
     }
@@ -306,12 +308,11 @@ use 5.010001;
     sub add_package_owners {
         my ( $self, $pkginsts ) = @_;
 
-        foreach my $pkginst (@{$pkginsts}) {
+        foreach my $pkginst ( @{$pkginsts} ) {
             next if ( first { $_ eq $pkginst } @{ $self->{packages} } );
             push( @{ $self->{packages} }, $pkginst );
         }
     }
-
 
     #
     # Purpose:    Set the list of packages that own this entry
@@ -320,8 +321,8 @@ use 5.010001;
     #
     sub set_package_owners {
         my ( $self, @pkginsts ) = @_;
-	my @package_owners = @pkginsts;
-	$self->{packages} = \@package_owners;
+        my @package_owners = @pkginsts;
+        $self->{packages} = \@package_owners;
     }
 
     #
@@ -392,6 +393,7 @@ use 5.010001;
                 and $self->{ftype} =~ /[fvel]/
                 and $pkgmap_entry->{ftype} eq 'f' )
             {
+
                 # A pkgmap entry of file type e, f, l or v just look like
                 # a regular file so we must consider that it's ok as long
                 # as the file installed is a regular file
@@ -639,8 +641,7 @@ use 5.010001;
 
             if ( defined($action_script) ) {
                 $self->_install_files_by_action_script( \@pkgmap_entries, $dest, $action_script );
-            }
-            else {
+            } else {
                 $self->_install_files_by_copy( \@pkgmap_entries, $dest );
             }
 
@@ -672,14 +673,13 @@ use 5.010001;
               grep { not $_->is_information_file() and $_->{class} eq $class } @{ $self->{pkgmap} };
 
             # We want the list reverse sorted so that we first remove the deepest paths
-            @pkgmap_entries = reverse(sort(@pkgmap_entries));
+            @pkgmap_entries = reverse( sort(@pkgmap_entries) );
 
             my $action_script = $self->check_installation_script( "r.$class", $action_scripts_location );
 
             if ( defined($action_script) ) {
                 $self->_remove_files_by_action_script( \@pkgmap_entries, $dest, $action_script );
-            }
-            else {
+            } else {
                 $self->_remove_files_by_unlink( \@pkgmap_entries, $dest );
             }
         }
@@ -838,8 +838,7 @@ use 5.010001;
                 $filename =~ s/^$path/$new_path/;
             }
 
-        }
-        else {
+        } else {
             %path_prefix_for = (
                 'abs' => 'root',
                 'rel' => 'reloc'
@@ -852,8 +851,7 @@ use 5.010001;
                 $prefix = catfile( $prefix, 'install' );
             }
 
-        }
-        else {
+        } else {
             my $relative = $pkgmap_entry->is_relative() ? 'rel' : 'abs';
             $prefix = catfile( $prefix, $path_prefix_for{$relative} );
         }
@@ -910,16 +908,15 @@ use 5.010001;
             open( my $fh, '<', $depend_file )
               or croak("ERROR: can't open $depend_file");
             while ( my $line = <$fh> ) {
-                my ($type, $pkginst, $name) = ($line =~ /([PIR]) (\S+) (.*)/);
-                next if not (defined ($type));
-                push (@{$dependencies{$type}}, $pkginst);
+                my ( $type, $pkginst, $name ) = ( $line =~ /([PIR]) (\S+) (.*)/ );
+                next if not( defined($type) );
+                push( @{ $dependencies{$type} }, $pkginst );
             }
             close($fh);
         }
 
         return ( \%dependencies );
     }
-
 
     #
     # Purpose:    Update various information about the current
@@ -1017,8 +1014,7 @@ use 5.010001;
 
             if ( $pkgmap_entry->is_directory() ) {
                 rmdir($dest_path);
-            }
-            else {
+            } else {
                 unlink($dest_path);
             }
         }
@@ -1186,10 +1182,6 @@ use 5.010001;
             $self->{path_mappings}{$path} = '';
         }
 
-        # We make sure some standard directories will be present for our next operations
-        make_path ( $self->{pkg_directory} );
-        make_path ( dirname($self->{content_file}) );
-
         return ( bless( $self, $class ) );
     }
 
@@ -1207,8 +1199,8 @@ use 5.010001;
         my $package_entries;
         my $options = { path_mappings => $self->{path_mappings} };
 
-        if (not defined($device)) {
-	    $device = $self->{pkg_directory};
+        if ( not defined($device) ) {
+            $device = $self->{pkg_directory};
         }
 
         if ( -f $device ) {
@@ -1256,8 +1248,8 @@ use 5.010001;
 
         my ($pkg_name) = ( $result =~ /Transferring <([^>]+)> package instance/ );
 
-        if (defined ($pkg_name) and $result =~ /no permission to overwrite existing path/) {
-            remove_tree (catfile($self->{spool_directory}, $pkg_name));
+        if ( defined($pkg_name) and $result =~ /no permission to overwrite existing path/ ) {
+            remove_tree( catfile( $self->{spool_directory}, $pkg_name ) );
             `$command 2>&1`;
         }
 
@@ -1265,15 +1257,13 @@ use 5.010001;
         return ($pkg_name);
     }
 
-
     #
     # Purpose:    Check if the given package is installed
     #
     sub is_package_installed {
-        my ($self, $pkginst) = @_;
-        return ( -e catfile($self->{pkg_directory}, $pkginst, 'pkginfo') );
+        my ( $self, $pkginst ) = @_;
+        return ( -e catfile( $self->{pkg_directory}, $pkginst, 'pkginfo' ) );
     }
-
 
     #
     # Purpose:    Returns the list of svr4 package names that
@@ -1320,7 +1310,7 @@ use 5.010001;
             {
 
                 my $package_entry = Package::Entry->new_from_line( $line, 'contents' );
-                $package_entry->set_package_owners( $pkginst );
+                $package_entry->set_package_owners($pkginst);
                 push( @pkgmap_entries, $package_entry );
             }
         }
@@ -1363,8 +1353,8 @@ use 5.010001;
                 $pkgmap_entry->add_package_owners( $old_pkgmap_entry->{packages} );
             }
 
-        }
-        else {
+        } else {
+
             #  we shift the array by one to make room for our new file
             if ( $idx <= $#contents ) {
                 splice( @contents, $idx, 1, ( '', $contents[$idx] ) );
@@ -1409,13 +1399,14 @@ use 5.010001;
         if ( $pkgmap_entry->is_directory() ) {
             my $new_pkgmap_entry = Package::Entry->new_from_line( $contents[$idx], 'contents' );
             $new_pkgmap_entry->remove_package_owners( $pkgmap_entry->{packages} );
-            if (@{$new_pkgmap_entry->{packages}}) {
+            if ( @{ $new_pkgmap_entry->{packages} } ) {
                 $contents[$idx] = $new_pkgmap_entry->as_contents_line();
                 $do_delete = 0;
             }
         }
 
-        if ($do_delete and $idx <= $#contents) {
+        if ( $do_delete and $idx <= $#contents ) {
+
             #  we remove the element from the contents file
             splice( @contents, $idx, 1 );
         }
@@ -1439,27 +1430,27 @@ use 5.010001;
         my $dest = $self->{root_path};
 
         my @missing_dependencies;
-        foreach my $dependency (@{$package->{dependencies}{'P'}}) {
-            if (not $self->is_package_installed($dependency)) {
-                push (@missing_dependencies, $dependency);
+        foreach my $dependency ( @{ $package->{dependencies}{'P'} } ) {
+            if ( not $self->is_package_installed($dependency) ) {
+                push( @missing_dependencies, $dependency );
             }
         }
         if (@missing_dependencies) {
-            return (DEPENDENCY_ERROR, \@missing_dependencies);
+            return ( DEPENDENCY_ERROR, \@missing_dependencies );
         }
 
-        if ( not ($options->{force}) ) {
-            my $conflicts = $self->_check_file_conflict($package, $dest);
-            if (@{$conflicts}) {
-                return (CONFLICT_ERROR, $conflicts);
+        if ( not( $options->{force} ) ) {
+            my $conflicts = $self->_check_file_conflict( $package, $dest );
+            if ( @{$conflicts} ) {
+                return ( CONFLICT_ERROR, $conflicts );
             }
         }
 
-        if ($self->is_package_installed($package->{pkginst})) {
+        if ( $self->is_package_installed( $package->{pkginst} ) ) {
             $package->{pkginfo}{UPDATE} = 'yes';
         }
 
-        $self->_verbose('## Installing package ' . $package->{pkginst} . "\n");
+        $self->_verbose( '## Installing package ' . $package->{pkginst} . "\n" );
 
         $self->_verbose('## Registering the package');
         $self->_register_package($package);
@@ -1471,7 +1462,7 @@ use 5.010001;
         $package->execute_procedure_script('preinstall');
 
         $self->_verbose('## Installing package files');
-        my $action_scripts_location = catfile($self->{root_path}, $self->{action_scripts_location});
+        my $action_scripts_location = catfile( $self->{root_path}, $self->{action_scripts_location} );
         $package->install_files( $dest, $action_scripts_location );
 
         $self->_verbose('## Executing postinstall script');
@@ -1491,13 +1482,13 @@ use 5.010001;
         my ( $self, $package ) = @_;
         my $dest = $self->{root_path};
 
-        $self->_verbose('## Removing package ' . $package->{pkginst} . "\n");
+        $self->_verbose( '## Removing package ' . $package->{pkginst} . "\n" );
 
         $self->_verbose('## Executing preremove script');
         $package->execute_procedure_script('preremove');
 
         $self->_verbose('## Removing package files');
-        my $action_scripts_location = catfile($self->{root_path}, $self->{action_scripts_location});
+        my $action_scripts_location = catfile( $self->{root_path}, $self->{action_scripts_location} );
         $package->remove_files( $dest, $action_scripts_location );
 
         $self->_verbose('## Executing postremove script');
@@ -1579,7 +1570,6 @@ use 5.010001;
 
     }
 
-
     #
     # Purpose:    Check if there are existing files that conflicts
     #             with the files of the given package
@@ -1590,33 +1580,32 @@ use 5.010001;
     #   $dest    - the root location where files are installed
     #
     sub _check_file_conflict {
-        my ($self, $package, $dest) = @_;
+        my ( $self, $package, $dest ) = @_;
         my @conflicts;
 
         my $idx = 0;
         my $filename_at_idx;
         tie( my @contents, 'Tie::File', $self->{content_file} );
-        foreach my $pkgmap_entry ( sort ( @{$package->{pkgmap}}) ) {
+        foreach my $pkgmap_entry ( sort ( @{ $package->{pkgmap} } ) ) {
 
             ( $idx, $filename_at_idx ) = $self->_find_insert_position( \@contents, $pkgmap_entry, $idx );
 
             # we check if the given path is already registered in the database,
             # or if the file is present on the filesystem
             if ( $filename_at_idx eq $pkgmap_entry->{filename} ) {
-                my $contents_entry = Package::Entry->new_from_line ( $contents[$idx], 'contents' );
-                next if (first { $_ eq $package->{pkginst} } @{$contents_entry->{packages}});
+                my $contents_entry = Package::Entry->new_from_line( $contents[$idx], 'contents' );
+                next if ( first { $_ eq $package->{pkginst} } @{ $contents_entry->{packages} } );
 
             } else {
-                next if (not ( -e $package->_build_path($pkgmap_entry, $dest) ) );
+                next if ( not( -e $package->_build_path( $pkgmap_entry, $dest ) ) );
             }
 
-            push(@conflicts, $pkgmap_entry->{filename});
+            push( @conflicts, $pkgmap_entry->{filename} );
         }
         untie(@contents);
 
-	return (\@conflicts);
+        return ( \@conflicts );
     }
-
 
     #
     # Purpose:    Find the location where the given pkgmap entry
@@ -1640,8 +1629,7 @@ use 5.010001;
             if ( $cmp > 0 ) {
                 $start = ++$idx;
                 return ( $idx, '' ) if ( $idx > $#{$contents} );
-            }
-            else {
+            } else {
                 $end = $idx;
             }
         }
@@ -1671,7 +1659,6 @@ sub is_interactive {
 use Getopt::Long;
 use POSIX qw(strftime);
 use File::Basename qw(basename dirname);
-
 
 # Default configuration for the package manager
 my %package_manager_config = (
@@ -1712,8 +1699,7 @@ sub info_cmd {
         my $package = $package_manager->get_package( $package_name, $options->{device} );
         if ( not defined($package) ) {
             print STDERR "ERROR: information for \"$package_name\" was not found\n";
-        }
-        else {
+        } else {
             print( $package->get_info( $options->{long_format} ? 'long' : 'short' ) . "\n" );
         }
     }
@@ -1731,29 +1717,31 @@ sub add_cmd {
 
     my ( $package_manager, $options, @arguments ) = @_;
 
-    return if (not @arguments);
+    return if ( not @arguments );
 
     my $pkginst = shift(@arguments);
     my $package = $package_manager->get_package( $pkginst, $options->{device} );
-    my ($ret, $info) = $package_manager->install_package( $package );
+    my ( $ret, $info ) = $package_manager->install_package($package);
 
-    if ($ret == Package::Manager::DEPENDENCY_ERROR) {
-    	print ("The following packages are not installed and are required to install $pkginst:\n");
-    	# In that case, $info is a reference to a list of missing required packages
-    	print (join("\n", map { "\t$_" } @{$info}) . "\n\n");
+    if ( $ret == Package::Manager::DEPENDENCY_ERROR ) {
+        print("The following packages are not installed and are required to install $pkginst:\n");
+
+        # In that case, $info is a reference to a list of missing required packages
+        print( join( "\n", map { "\t$_" } @{$info} ) . "\n\n" );
         return;
     }
 
-    if ($ret == Package::Manager::CONFLICT_ERROR) {
-    	print ("The following files are already installed on the system:\n");
-    	# In that case, $info is a reference to a list of conflicting files
-    	print (join("\n", map { "\t$_" } @{$info}) . "\n\n");
+    if ( $ret == Package::Manager::CONFLICT_ERROR ) {
+        print("The following files are already installed on the system:\n");
 
-    	if (is_interactive()) {
+        # In that case, $info is a reference to a list of conflicting files
+        print( join( "\n", map { "\t$_" } @{$info} ) . "\n\n" );
+
+        if ( is_interactive() ) {
             print 'Would you like to install the package anyway (y/n) ? ';
             my $answer = <STDIN>;
-            if ($answer =~ /^[Yy]$/) {
-                ($ret, $info) = $package_manager->install_package( $package, { force => 1 } );
+            if ( $answer =~ /^[Yy]$/ ) {
+                ( $ret, $info ) = $package_manager->install_package( $package, { force => 1 } );
             }
         }
     }
@@ -1771,11 +1759,11 @@ sub rm_cmd {
 
     my ( $package_manager, $options, @arguments ) = @_;
 
-    return if (not @arguments);
+    return if ( not @arguments );
 
     my @packages_list;
     foreach my $pkginst (@arguments) {
-        my $package = $package_manager->get_package( $pkginst );
+        my $package = $package_manager->get_package($pkginst);
         if ( not defined($package) ) {
             print STDERR "ERROR: no package associated with <$pkginst>\n";
             exit(1);
@@ -1800,7 +1788,7 @@ sub param_cmd {
 
     my ( $package_manager, $options, @arguments ) = @_;
 
-    return if (not @arguments);
+    return if ( not @arguments );
 
     my $pkginst = shift(@arguments);
     my $package = $package_manager->get_package( $pkginst, $options->{device} );
@@ -1865,10 +1853,8 @@ sub installf_cmd {
     my %fields = { 'class' => $options->{class} };
 
     if ( @arguments >= MAX_FIELDS_COUNT ) {
-        $fields{ 'major', 'minor', 'mode', 'owner', 'group' } =
-          @arguments[ MIN_FIELDS_COUNT .. MAX_FIELDS_COUNT - 1 ];
-    }
-    elsif ( @arguments > MIN_FIELDS_COUNT ) {
+        $fields{ 'major', 'minor', 'mode', 'owner', 'group' } = @arguments[ MIN_FIELDS_COUNT .. MAX_FIELDS_COUNT - 1 ];
+    } elsif ( @arguments > MIN_FIELDS_COUNT ) {
         $fields{ 'mode', 'owner', 'group' } = @arguments[ MIN_FIELDS_COUNT .. $#arguments ];
     }
 
