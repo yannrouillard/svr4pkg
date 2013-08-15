@@ -460,55 +460,35 @@ use 5.010001;
     #
     sub new {
         my ( $class, $path, $pkginst, $options ) = @_;
-        my $self = bless( {}, $class );
-
-        if ( not defined($options) ) {
-            $options = {};
-        }
-
-        $self->{path}            = $path;
-        $self->{pkginst}         = $pkginst;
-        $self->{package_scripts} = {};
-        $self->{statistics}      = {
-            directories       => 0,
-            executables       => 0,
-            pathnames         => 1,
-            information_files => 1,
-            blocks            => 0,
+        my $self = {
+            path            => $path,
+            pkginst         => $pkginst,
+            package_entries => [],
+            dependencies    => {},
+            path_mappings   => {},
+            statistics      => {
+                directories       => 0,
+                executables       => 0,
+                pathnames         => 1,
+                information_files => 1,
+                blocks            => 0,
+            },
         };
 
-        if ( not $self->_load_parameters_file("$path/$pkginst/pkginfo") ) {
-            return;
-        }
-
         # Handling optional arguments
-        $self->{path_mappings} =
-          exists( $options->{path_mappings} )
-          ? $options->{path_mappings}
-          : {};
-
-        $self->{pkgmap} =
-          exists( $options->{package_entries} )
-          ? $options->{package_entries}
-          : $self->_load_pkgmap();
-
-        $self->{dependencies} = $self->_load_depend();
-
-        if ( not defined( $self->{pkgmap} ) ) {
-            return;
+        foreach my $option_name (qw(path_mappings package_entries)) {
+            if ( exists( $options->{$option_name} ) ) {
+                $self->{$option_name} = $options->{$option_name};
+            }
         }
+        bless( $self, $class );
+
+        $self->_load_pkginfo();
+        $self->_load_pkgmap();
+        $self->_load_depend();
 
         $self->_update_package_info();
-
-        # Setup some basic informations that will be passed in
-        # the environment of each installation script
-        $self->{pkginfo}{PKGINST}       = $pkginst;
-        $self->{pkginfo}{INST_DATADIR}  = $path;
-        $self->{pkginfo}{PKG_CLIENT_OS} = 'Solaris';
-        $self->{pkginfo}{TZ}            = $ENV{TZ};
-        if ( not exists( $self->{pkginfo}{BASEDIR} ) ) {
-            $self->{pkginfo}{BASEDIR} = '/';
-        }
+        $self->_setup_base_environnement();
 
         return ($self);
     }
@@ -541,13 +521,38 @@ use 5.010001;
                 ( $header, $self->{statistics}{ $statistic->{name} }, $statistic->{display} ) );
 
             # The "FILES:" header is just on the first line, so we set if
-            # as an empty string just
+            # as an empty string just after the first line
             if ($header) {
                 $header = ' ';
             }
         }
 
         return ($info);
+    }
+
+    #
+    # Purpose:     Get the value of a given parameter
+    #
+    # Parameters:
+    #   $parameter - the name of the parameter
+    #
+    sub get_parameter {
+        my ( $self, $parameter ) = @_;
+        return if not( exists( $self->{pkginfo}{$parameter} ) );
+
+        return ( $self->{pkginfo}{$parameter} );
+    }
+
+    #
+    # Purpose:     Set the value of a given parameter
+    #
+    # Parameters:
+    #   $parameter - the name of the parameter
+    #   $value     - the value to set
+    #
+    sub put_parameter {
+        my ( $self, $parameter, $value ) = @_;
+        $self->{pkginfo}{$parameter} = $value;
     }
 
     #
@@ -590,10 +595,10 @@ use 5.010001;
         my ( $self, $dest ) = @_;
 
         my @pkgmap_entries =
-          grep { $_->is_information_file() and $_->{pathname} ne 'pkginfo' } @{ $self->{pkgmap} };
-        $self->_install_files_by_copy( \@pkgmap_entries, $dest );
-        $self->{pkginfo}{INSTDATE} = strftime( '%b %d %Y %H:%M', localtime() );
-        $self->_dump_parameters_file("$dest/pkginfo");
+          grep { $_->is_information_file() and $_->{pathname} ne 'pkginfo' } @{ $self->{package_entries} };
+        $self->_install_files_by_copy( \@pkgmap_entries, catfile( $dest, 'install' ) );
+        $self->put_parameter( 'INSTDATE', strftime( '%b %d %Y %H:%M', localtime() ) );
+        $self->_dump_pkginfo( catfile( $dest, 'pkginfo' ) );
     }
 
     #
@@ -608,7 +613,7 @@ use 5.010001;
     sub install_files {
         my ( $self, $dest, $action_scripts_location ) = @_;
 
-        my @classes = split( /\s+/, $self->{pkginfo}{CLASSES} );
+        my @classes = split( /\s+/, $self->get_parameter('CLASSES') );
 
         # The none class is always processed first
         @classes = ( 'none', grep { $_ ne 'none' } @classes );
@@ -616,10 +621,9 @@ use 5.010001;
         foreach my $class (@classes) {
 
             my @pkgmap_entries =
-              grep { not $_->is_information_file() and $_->{class} eq $class } @{ $self->{pkgmap} };
+              grep { defined( $_->{class} ) and $_->{class} eq $class } @{ $self->{package_entries} };
 
             my $action_script = $self->check_installation_script( "i.$class", $action_scripts_location );
-
             if ( defined($action_script) ) {
                 $self->_install_files_by_action_script( \@pkgmap_entries, $dest, $action_script );
             } else {
@@ -643,21 +647,21 @@ use 5.010001;
     sub remove_files {
         my ( $self, $dest, $action_scripts_location ) = @_;
 
-        my @classes = split( /\s+/, $self->{pkginfo}{CLASSES} );
+        my @classes = split( /\s+/, $self->get_parameter('CLASSES') );
 
-        # The none class is always processed last
+        # The classes are processed in reversed order at removal time
+        # and the none class is always processed last
         @classes = reverse( 'none', grep { $_ ne 'none' } @classes );
 
         foreach my $class (@classes) {
 
             my @pkgmap_entries =
-              grep { not $_->is_information_file() and $_->{class} eq $class } @{ $self->{pkgmap} };
+              grep { defined( $_->{class} ) and $_->{class} eq $class } @{ $self->{package_entries} };
 
             # We want the list reverse sorted so that we first remove the deepest paths
             @pkgmap_entries = reverse( sort(@pkgmap_entries) );
 
             my $action_script = $self->check_installation_script( "r.$class", $action_scripts_location );
-
             if ( defined($action_script) ) {
                 $self->_remove_files_by_action_script( \@pkgmap_entries, $dest, $action_script );
             } else {
@@ -674,16 +678,12 @@ use 5.010001;
     #
     # Parameters:
     #   $dest - the root directory where files have been installed
-    #           (defaut to '/' if not specified)
     #
     sub check_installed_files {
         my ( $self, $dest ) = @_;
         my @inconsistent_files;
-        if ( not defined $dest ) {
-            $dest = '/';
-        }
 
-        foreach my $pkgmap_entry ( @{ $self->{pkgmap} } ) {
+        foreach my $pkgmap_entry ( @{ $self->{package_entries} } ) {
             my $filename = $self->_build_path( $pkgmap_entry, $dest );
             my $non_compliant_fields = $pkgmap_entry->check_file_properties($filename);
 
@@ -718,7 +718,7 @@ use 5.010001;
     sub execute_procedure_script {
         my ( $self, $script ) = @_;
 
-        return (0) if not exists( $self->{package_scripts}{$script} );
+        return if not exists( $self->{package_scripts}{$script} );
 
         my $pkgmap_entry = $self->{package_scripts}{$script};
         my $script_path  = $self->_build_path($pkgmap_entry);
@@ -746,7 +746,7 @@ use 5.010001;
         local @ENV{ keys( %{ $self->{pkginfo} } ) } = values( %{ $self->{pkginfo} } );
         my $ret = system(@command);
         if ($response_file) {
-            $self->_load_parameters_file($response_file);
+            $self->_load_pkginfo( $response_file, { append => 1 } );
         }
         return ($ret);
     }
@@ -754,16 +754,36 @@ use 5.010001;
     ## Private methods
 
     #
-    # Purpose:    Load a parameters file which has the following form
-    #              PARAMETER=VALUE
+    # Purpose:    Setup some basic informations that will be passed in
+    #             the environment of each installation script
     #
     # Parameters:
     #   $file       - the path of the parameters file to load
     #
-    sub _load_parameters_file {
-        my ( $self, $file ) = @_;
+    sub _setup_base_environnement {
+        my ($self) = @_;
 
-        open( my $fh, '<', $file ) or return;
+        $self->put_parameter( 'PKGINST',       $self->{pkginst} );
+        $self->put_parameter( 'INST_DATADIR',  $self->{path} );
+        $self->put_parameter( 'PKG_CLIENT_OS', 'Solaris' );
+        $self->put_parameter( 'TZ',            $ENV{TZ} );
+        if ( not $self->get_parameter('BASEDIR') ) {
+            $self->put_parameter( 'BASEDIR', '/' );
+        }
+    }
+
+    #
+    # Purpose:    Parse the pkginfo file
+    #
+    sub _load_pkginfo {
+        my ( $self, $options ) = @_;
+        my $pkginfo_file = catfile( $self->{path}, $self->{pkginst}, 'pkginfo' );
+
+        if ( not $options->{append} ) {
+            $self->{pkginfo} = {};
+        }
+
+        open( my $fh, '<', $pkginfo_file ) or return;
         while ( my $line = <$fh> ) {
             chomp($line);
             my ( $key, $value ) = split( /=/, $line, 2 );
@@ -779,7 +799,7 @@ use 5.010001;
     # Parameters:
     #   $file       - the path of the parameters file to load
     #
-    sub _dump_parameters_file {
+    sub _dump_pkginfo {
         my ( $self, $file ) = @_;
 
         open( my $fh, '>', $file ) or return;
@@ -791,83 +811,27 @@ use 5.010001;
     }
 
     #
-    # Purpose:    Given a Package::Entry objet, this method returns
-    #             the source path where the corresponding file is located
-    #             or the destination path where the corresponding file
-    #             must be installed depending on the argument.
-    #
-    # Parameters:
-    #   $pkgmap_entry - a Package::Entry object
-    #
-    sub _build_path {
-        my ( $self, $pkgmap_entry, $dest ) = @_;
-
-        my $prefix;
-        my %path_prefix_for;
-        my $filename = $pkgmap_entry->{filename};
-
-        if ( defined($dest) ) {
-            %path_prefix_for = (
-                'abs' => '',
-                'rel' => $self->{pkginfo}->{BASEDIR}
-            );
-            $prefix   = $dest;
-            $filename = $pkgmap_entry->{filename};
-
-            foreach my $path ( keys( %{ $self->{path_mappings} } ) ) {
-                my $new_path = $self->{path_mappings}{$path};
-                $filename =~ s/^$path/$new_path/;
-            }
-
-        } else {
-            %path_prefix_for = (
-                'abs' => 'root',
-                'rel' => 'reloc'
-            );
-            $prefix = catfile( $self->{path}, $self->{pkginst} );
-        }
-
-        if ( $pkgmap_entry->is_information_file() ) {
-            if ( $filename !~ /pkginfo|pkgmap/ ) {
-                $prefix = catfile( $prefix, 'install' );
-            }
-
-        } else {
-            my $relative = $pkgmap_entry->is_relative() ? 'rel' : 'abs';
-            $prefix = catfile( $prefix, $path_prefix_for{$relative} );
-        }
-
-        return catfile( $prefix, $filename );
-    }
-
-    #
     # Purpose:    Parse the pkgmap file located in the package and
     #             initialize the list of package entries.
     #             At the end of this method, the 'pkgmap' internal
     #             attr is properly initialized as a list of
     #             Package::Entry objects.
     #
-    # Parameters:
-    #   $pkgmap_file - the path of the pkgmap file
-    #
     sub _load_pkgmap {
-        my $self = shift;
-        my @pkgmap;
+        my ($self) = @_;
         my $pkgmap_file = catfile( $self->{path}, $self->{pkginst}, 'pkgmap' );
+        return if not( -r $pkgmap_file );
 
-        open( my $fh, '<', $pkgmap_file )
-          or croak("ERROR: can't open $pkgmap_file");
+        open( my $fh, '<', $pkgmap_file ) or croak("ERROR: can't open $pkgmap_file");
         while ( my $line = <$fh> ) {
             next if ( $line =~ /^:/ );
             chomp($line);
 
             my $pkgmap_entry = Package::Entry->new_from_line( $line, 'pkgmap', $self->{pkginst} );
-            push( @pkgmap, $pkgmap_entry );
+            push( @{ $self->{package_entries} }, $pkgmap_entry );
 
         }
         close($fh);
-
-        return ( \@pkgmap );
     }
 
     #
@@ -882,21 +846,17 @@ use 5.010001;
     #
     sub _load_depend {
         my $self = shift;
-        my %dependencies;
         my $depend_file = catfile( $self->{path}, $self->{pkginst}, 'install/depend' );
 
         if ( -r $depend_file ) {
-            open( my $fh, '<', $depend_file )
-              or croak("ERROR: can't open $depend_file");
+            open( my $fh, '<', $depend_file ) or croak("ERROR: can't open $depend_file");
             while ( my $line = <$fh> ) {
                 my ( $type, $pkginst, $name ) = ( $line =~ /([PIR]) (\S+) (.*)/ );
                 next if not( defined($type) );
-                push( @{ $dependencies{$type} }, $pkginst );
+                push( @{ $self->{dependencies}{$type} }, $pkginst );
             }
             close($fh);
         }
-
-        return ( \%dependencies );
     }
 
     #
@@ -909,7 +869,7 @@ use 5.010001;
     sub _update_package_info {
         my $self = shift;
 
-        foreach my $pkgmap_entry ( @{ $self->{pkgmap} } ) {
+        foreach my $pkgmap_entry ( @{ $self->{package_entries} } ) {
 
             # We note what installation scripts are provided in the package
             if ( $pkgmap_entry->is_installation_script() ) {
@@ -919,20 +879,53 @@ use 5.010001;
             # We update some statistics about the package contents while
             # parsing the pkgmap file
             given ($pkgmap_entry) {
-                when ( $_->is_directory ) {
-                    $self->{statistics}{directories} += 1
-                }
-                when ( $_->is_executable ) {
-                    $self->{statistics}{executables} += 1
-                }
-                when ( $_->is_information_file ) {
-                    $self->{statistics}{information_files} += 1
-                }
+                when ( $_->is_directory )        { $self->{statistics}{directories}       += 1 }
+                when ( $_->is_executable )       { $self->{statistics}{executables}       += 1 }
+                when ( $_->is_information_file ) { $self->{statistics}{information_files} += 1 }
             }
             $self->{statistics}{pathnames} += 1;
             $self->{statistics}{blocks} += $pkgmap_entry->get_block_size();
 
         }
+    }
+
+    #
+    # Purpose:    Given a Package::Entry objet, this method returns
+    #             the source path where the corresponding file is located
+    #             or the destination path where the corresponding file
+    #             must be installed depending on the argument.
+    #
+    # Parameters:
+    #   $pkgmap_entry - a Package::Entry object
+    #
+    sub _build_path {
+        my ( $self, $pkgmap_entry, $dest ) = @_;
+        my @path_components;
+
+        my $filename = $pkgmap_entry->{filename};
+
+        if ( defined($dest) ) {
+            push( @path_components, $dest );
+            if ( $pkgmap_entry->is_relative() ) {
+                push( @path_components, $self->get_parameter('BASEDIR') );
+            }
+
+            foreach my $path ( keys( %{ $self->{path_mappings} } ) ) {
+                my $new_path = $self->{path_mappings}{$path};
+                $filename =~ s/^$path/$new_path/;
+            }
+
+        } else {
+            push( @path_components, $self->{path}, $self->{pkginst} );
+            if ( $pkgmap_entry->is_information_file() ) {
+                push( @path_components, 'install' );
+            } else {
+                push( @path_components, $pkgmap_entry->is_relative() ? 'reloc' : 'root' );
+            }
+        }
+        push( @path_components, $filename );
+
+        return ( catfile(@path_components) );
     }
 
     #
@@ -953,22 +946,16 @@ use 5.010001;
 
         foreach my $pkgmap_entry ( @{$pkgmap_entries} ) {
             my $dest_path = $self->_build_path( $pkgmap_entry, $dest );
-
             make_path( dirname($dest_path) );
 
             given ($pkgmap_entry) {
-                when ( $_->is_symlink() ) {
-                    symlink( $pkgmap_entry->{targetname}, $dest_path );
-                }
-                when ( $_->is_hardlink() ) {
-                    link( $pkgmap_entry->{targetname}, $dest_path );
-                }
+                when ( $_->is_symlink() ) { symlink( $pkgmap_entry->{targetname}, $dest_path ); }
+                when ( $_->is_hardlink() ) { link( $pkgmap_entry->{targetname}, $dest_path ); }
+                when ( $_->is_directory() ) { mkdir($dest_path); }
+
                 when ( $_->is_regular_file() or $_->is_information_file() ) {
                     my $src_path = $self->_build_path($pkgmap_entry);
                     copy( $src_path, $dest_path );
-                }
-                when ( $_->is_directory() ) {
-                    mkdir($dest_path);
                 }
             }
         }
@@ -987,7 +974,6 @@ use 5.010001;
     #   $dest         - the root directory where files must be installed
     #
     sub _remove_files_by_unlink {
-
         my ( $self, $pkgmap_entries, $dest ) = @_;
 
         foreach my $pkgmap_entry ( @{$pkgmap_entries} ) {
@@ -1018,8 +1004,7 @@ use 5.010001;
         $action_script = $self->_relocate_path_in_script($action_script);
 
         local @ENV{ keys( %{ $self->{pkginfo} } ) } = values( %{ $self->{pkginfo} } );
-        open( my $fh, '|-', $action_script )
-          or croak("ERROR: can't run $action_script !");
+        open( my $fh, '|-', $action_script ) or croak("ERROR: can't run $action_script !");
 
         foreach my $pkgmap_entry ( @{$pkgmap_entries} ) {
 
@@ -1050,8 +1035,7 @@ use 5.010001;
         $action_script = $self->_relocate_path_in_script($action_script);
 
         local @ENV{ keys( %{ $self->{pkginfo} } ) } = values( %{ $self->{pkginfo} } );
-        open( my $fh, '|-', $action_script )
-          or croak("ERROR: can't run script $action_script !");
+        open( my $fh, '|-', $action_script ) or croak("ERROR: can't run script $action_script !");
 
         foreach my $pkgmap_entry ( @{$pkgmap_entries} ) {
 
@@ -1085,8 +1069,7 @@ use 5.010001;
         my $patched_script = File::Temp->new( UNLINK => 1 );
         chmod( EXECUTABLE_PERMISSIONS, $patched_script );
 
-        open( my $fh, '<', $script )
-          or croak("ERROR: can't open file $script !");
+        open( my $fh, '<', $script ) or croak("ERROR: can't open file $script !");
         while ( my $line = <$fh> ) {
             foreach my $path ( keys( %{ $self->{path_mappings} } ) ) {
                 my $new_path = $self->{path_mappings}{$path};
@@ -1427,7 +1410,7 @@ use 5.010001;
         }
 
         if ( $self->is_package_installed( $package->{pkginst} ) ) {
-            $package->{pkginfo}{UPDATE} = 'yes';
+            $package->put_parameter( 'UPDATE', 'yes' );
         }
 
         $self->_verbose( '## Installing package ' . $package->{pkginst} . "\n" );
@@ -1530,7 +1513,7 @@ use 5.010001;
         # update /var/sadm/install/contents
         make_path( dirname( $self->{content_file} ) );
 
-        my $pkgmap = $package->{pkgmap};
+        my $pkgmap = $package->{package_entries};
         my $index  = 0;
         foreach my $pkgmap_entry ( sort( @{$pkgmap} ) ) {
 
@@ -1552,7 +1535,7 @@ use 5.010001;
     sub _unregister_package {
         my ( $self, $package ) = @_;
 
-        my $pkgmap = $package->{pkgmap};
+        my $pkgmap = $package->{package_entries};
         my $index  = 0;
         foreach my $pkgmap_entry ( sort( @{$pkgmap} ) ) {
             next if ( $pkgmap_entry->is_information_file() );
@@ -1585,7 +1568,7 @@ use 5.010001;
         my $idx = 0;
         my $filename_at_idx;
         tie( my @contents, 'Tie::File', $self->{content_file} );
-        foreach my $pkgmap_entry ( sort ( @{ $package->{pkgmap} } ) ) {
+        foreach my $pkgmap_entry ( sort ( @{ $package->{package_entries} } ) ) {
 
             ( $idx, $filename_at_idx ) = $self->_find_insert_position( \@contents, $pkgmap_entry, $idx );
 
