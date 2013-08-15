@@ -109,6 +109,8 @@ my @excluded_files_or_directory = (
     qr{/var/sadm/install/gz-only-packages}x,    # ...svr4pkg
     qr{/usr/sadm$}x,
     qr{/usr$}x,
+    qr{/var/sadm$}x,
+    qr{/var$}x,
 );
 
 my %path_mappings = ( '/usr/sadm/install' => '/var/sadm/install', );
