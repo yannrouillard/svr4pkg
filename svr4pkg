@@ -47,22 +47,18 @@ use 5.010001;
 
     # List of fields of the package entry object
     my @package_entry_fields = qw(
-      part  ftype  class  pathname  major  minor
-      mode  owner  group  size      cksum  modtime
-      filename     targetname       packages
+      part ftype class  pathname major minor mode owner group size cksum modtime
+      filename targetname packages
     );
 
-    # These value of fields are used we check than
-    # that a local file is consistent with a package
-    # entry
+    # These value of fields are used we check that a local file is consistent
+    # with a package entry
     my @compliance_fields = qw(
-      ftype major minor mode owner
-      group size  cksum modtime
+      ftype major minor mode owner group size cksum modtime
     );
 
-    # Mapping between the file type and the format of the line
-    # for that file type, both for a pkgmap file and the
-    # /var/sadm/install/contents file
+    # Mapping between the file type and the format of the line for that file type,
+    # both for a pkgmap file and the /var/sadm/install/contents file
     # Between the two, the only difference is that, in the latter
     # the pathname field is first and the part field is absent.
     my %line_format_for = (
@@ -95,14 +91,8 @@ use 5.010001;
         },
     );
 
-    # Mapping between the file type and the format of the pkgmap line
-    # The only difference between the pkgmap line format and the
-    # /var/sadm/install/contents line format is that in the latter
-    # the pathname attr is first and the part attr is absent
-
-    my %allowed_scripts = map { $_ => 1 } qw/ request    checkinstall
-      preinstall postinstall
-      premove    postremove   /;
+    # The list of procedure scripts that can be present in packages
+    my %allowed_scripts = map { $_ => 1 } qw(request checkinstall preinstall postinstall premove postremove);
 
     # Mapping between the system file type (as returned by stat)
     # and the pkgmap file type
@@ -121,38 +111,38 @@ use 5.010001;
     ## Public methods
 
     #
-    # Purpose:    Creates and returns a pkgmap_entry object from a valid
-    #             line in a pkgmap file
+    # Purpose:    Creates and returns a package entry object of the
+    #             given type and whose attributes are initialized
+    #             with the given values
+    #
     # Parameters:
-    #   $pkgmap_line - a string containing a line of a pkgmap file
-    #   $ftype       -
-    #   $fields      -
+    #   $entry_type - either:
+    #                  pkgmap:   for a package entry in a pkgmap file
+    #                  contents: for a package entry in the contents file
+    #   $file_type  - the file type of the pkgmap entry
+    #   $values     - a hash containing the values of the attributes
+    #   @pkginst    - an optional list of package that owns this entry
     #
     sub new {
-        my ( $class, $format, $ftype, $fields, $pkginst ) = @_;
+        my ( $class, $entry_type, $file_type, $values, @pkginsts ) = @_;
         my $self = {};
 
-        my %pkgmap_fields =
-          map { $_ => 1 } @{ $line_format_for{$format}{$ftype} };
+        @{$self}{@package_entry_fields} = undef;
 
-        foreach my $field (@package_entry_fields) {
-            $self->{$field} =
-                ( not exists( $pkgmap_fields{$field} ) ) ? undef
-              : exists( $fields->{$field} )              ? $fields->{$field}
-              :                                            undef;
+        $self->{packages} = [];
+
+        my $allowed_fields = $line_format_for{$entry_type}{$file_type};
+        foreach my $field ( @{$allowed_fields} ) {
+            if ( exists( $values->{$field} ) ) {
+                $self->{$field} = $values->{$field};
+            }
         }
+        push( @{ $self->{packages} }, @pkginsts );
+
         bless( $self, $class );
 
-        if ( not defined( $self->{packages} ) ) {
-            $self->{packages} = [];
-        }
-        if ( defined($pkginst) ) {
-            push( @{ $self->{packages} }, $pkginst );
-        }
-
         if ( $self->is_symlink() or $self->is_hardlink() ) {
-            ( $self->{filename}, $self->{targetname} ) =
-              split( /=/, $self->{pathname}, 2 );
+            ( $self->{filename}, $self->{targetname} ) = split( /=/, $self->{pathname}, 2 );
         } else {
             $self->{filename} = $self->{pathname};
         }
@@ -164,64 +154,70 @@ use 5.010001;
     # Purpose:    Creates and returns a pkgmap_entry object from a valid
     #             line in a pkgmap file
     # Parameters:
-    #   $line   - a string containing a line describing the file and
-    #             its properties
-    #   $format - the format of the line which can be either:
-    #       pkgmap: for a line of a pkgmap file
-    #       contents: for a line of the /var/sadm/install/contents file
+    #   $line     - a string containing a line describing the file and its properties
+    #   $format   - the format of the line which can be either:
+    #                pkgmap: for a line in a pkgmap file
+    #                contents: for a line in the /var/sadm/install/contents file
+    #   @pkginsts - an optional list of package names that owns this entry
     #
     sub new_from_line {
-        my ( $class, $pkgmap_line, $format, $pkginst ) = @_;
-        my %fields;
+        my ( $class, $line, $format, @pkginsts ) = @_;
+        my $values = {};
 
-        my @pkgmap_values = split( /\s+/, $pkgmap_line );
-        my $ftype = $pkgmap_values[1];
+        my @items = split( /\s+/, $line );
+        my $ftype = $items[1];
 
         # the list of attributes presents in a line differ depending
         # on the file type, so we get the associated line template and
         # initialize the attributes accordingly
         my $field_name_at = $line_format_for{$format}{$ftype};
         foreach my $index ( 0 .. $#{$field_name_at} ) {
-            $fields{ $field_name_at->[$index] } = shift(@pkgmap_values);
-        }
-        if ( $format eq 'contents' ) {
-            $fields{packages} = [ $fields{packages}, @pkgmap_values ];
+            $values->{ $field_name_at->[$index] } = shift(@items);
         }
 
-        return ( new( $class, $format, $ftype, \%fields, $pkginst ) );
+        # The package attribute is different, it's a list and not a scalar
+        if ( $format eq 'contents' ) {
+            $values->{packages} = [ $values->{packages}, @items ];
+        }
+
+        return ( new( $class, $format, $ftype, $values, @pkginsts ) );
     }
 
     #
-    # Purpose:    Creates and returns a pkgmap_entry object from a valid
-    #             line in a pkgmap file
+    # Purpose:    Creates and returns a pkgmap_entry object whose attributes
+    #             values are based on the attributes of an existing file
+    #
     # Parameters:
-    #   $pkgmap_line - a string containing a line of a pkgmap file
+    #   $filename          - path of the filename
+    #   $additional_values - additional attributes values
+    #   @pkginsts          - an optional list of package names that owns this entry
     #
     sub new_from_file {
-        my ( $class, $filename, $fields, $pkginst ) = @_;
-        my %file_fields;
+        my ( $class, $filename, $additional_values, @pkginst ) = @_;
+        my $values = {};
 
         my $stats = lstat($filename);
-        $file_fields{part}     = 1;
-        $file_fields{ftype}    = $pkgmap_ftype_for{ S_IFMT( $stats->mode() ) };
-        $file_fields{pathname} = $filename;
-        $file_fields{class}    = 'none';
-        $file_fields{size}     = $stats->size();
-        $file_fields{owner}    = getpwuid( $stats->uid() );
-        $file_fields{group}    = getgrgid( $stats->gid() );
-        $file_fields{modtime}  = $stats->mtime();
-        $file_fields{mode}     = sprintf( '%.4o', S_IMODE( $stats->mode() ) );
-        $file_fields{minor}    = $stats->rdev() % 256;
-        $file_fields{major}    = int( $stats->rdev() / 256 );
-        if ( $file_fields{ftype} =~ /[fev]/ ) {
-            $file_fields{cksum} = ( split( /\s+/, `/usr/bin/sum $filename`, 2 ) )[0];
-        }
-        if ( $CHILD_ERROR >> 8 ) {
-            croak('ERROR: couldn\'t run the binary /usr/bin/sum !');
+        $values->{part}     = 1;
+        $values->{ftype}    = $pkgmap_ftype_for{ S_IFMT( $stats->mode() ) };
+        $values->{pathname} = $filename;
+        $values->{class}    = 'none';
+        $values->{size}     = $stats->size();
+        $values->{owner}    = getpwuid( $stats->uid() );
+        $values->{group}    = getgrgid( $stats->gid() );
+        $values->{modtime}  = $stats->mtime();
+        $values->{mode}     = sprintf( '%.4o', S_IMODE( $stats->mode() ) );
+        $values->{minor}    = $stats->rdev() % 256;
+        $values->{major}    = int( $stats->rdev() / 256 );
+
+        if ( $values->{ftype} =~ /[fev]/ ) {
+            $values->{cksum} = ( split( /\s+/, `/usr/bin/sum $filename`, 2 ) )[0];
+            if ( $CHILD_ERROR >> 8 ) {
+                croak('ERROR: couldn\'t run the binary /usr/bin/sum !');
+            }
         }
 
-        $file_fields{ keys( %{$fields} ) } = values( %{$fields} );
-        return ( new( $class, 'pkgmap', $file_fields{ftype}, \%file_fields, $pkginst ) );
+        $values->{ keys( %{$additional_values} ) } = values( %{$additional_values} );
+        return ( new( $class, 'pkgmap', $values->{ftype}, $values, @pkginst ) );
     }
 
     #
@@ -230,14 +226,10 @@ use 5.010001;
     #
     sub is_directory        { my $self = shift; return ( $self->{ftype} eq 'd' ); }
     sub is_information_file { my $self = shift; return ( $self->{ftype} eq 'i' ); }
-    sub is_regular_file     { my $self = shift; return ( $self->{ftype} eq 'f' ); }
     sub is_symlink          { my $self = shift; return ( $self->{ftype} eq 's' ); }
     sub is_hardlink         { my $self = shift; return ( $self->{ftype} eq 'l' ); }
-
-    sub is_relative {
-        my $self = shift;
-        return ( not file_name_is_absolute( $self->{pathname} ) );
-    }
+    sub is_regular_file { my $self = shift; return ( $self->{ftype} =~ /[fve]/ ); }
+    sub is_relative { my $self = shift; return ( not file_name_is_absolute( $self->{pathname} ) ); }
 
     sub is_executable {
         my $self = shift;
@@ -289,13 +281,15 @@ use 5.010001;
         # information files are not stored in the contents file
         return if ( $self->is_information_file() );
 
-        my $pkginsts = $self->{packages};
-
         my @contents_line_fields = @{ $line_format_for{'contents'}{ $self->{ftype} } };
 
-        # We remove the last one, packages, because we handle it differently
+        # We remove the last one, 'packages', because it's a list that we must handle differently
         pop(@contents_line_fields);
-        my $line = join( ' ', ( map ( { $self->{$_} } @contents_line_fields ), @{$pkginsts} ) );
+
+        my @values = map ( { $self->{$_} } @contents_line_fields );
+        push( @values, @{ $self->{packages} } );
+
+        my $line = join( ' ', @values );
         return ($line);
     }
 
@@ -305,24 +299,13 @@ use 5.010001;
     # Parameters:
     #   @pkginsts - the list of SVR4 package names that own this entry
     #
-    sub add_package_owners {
-        my ( $self, $pkginsts ) = @_;
+    sub add_owners {
+        my ( $self, @pkginsts ) = @_;
 
-        foreach my $pkginst ( @{$pkginsts} ) {
+        foreach my $pkginst (@pkginsts) {
             next if ( first { $_ eq $pkginst } @{ $self->{packages} } );
             push( @{ $self->{packages} }, $pkginst );
         }
-    }
-
-    #
-    # Purpose:    Set the list of packages that own this entry
-    # Parameters:
-    #   @pkginsts - the list of SVR4 package names that own this entry
-    #
-    sub set_package_owners {
-        my ( $self, @pkginsts ) = @_;
-        my @package_owners = @pkginsts;
-        $self->{packages} = \@package_owners;
     }
 
     #
@@ -332,12 +315,12 @@ use 5.010001;
     #   @pkginsts - the list of SVR4 package names that don't own this
     #               entry anymore
     #
-    sub remove_package_owners {
-        my ( $self, $pkginsts ) = @_;
+    sub remove_owners {
+        my ( $self, @pkginsts ) = @_;
 
         my @packages;
         foreach my $pkginst ( @{ $self->{packages} } ) {
-            next if ( first { $_ eq $pkginst } @{$pkginsts} );
+            next if ( first { $_ eq $pkginst } @pkginsts );
             push( @packages, $pkginst );
         }
         $self->{packages} = \@packages;
@@ -389,14 +372,12 @@ use 5.010001;
         foreach my $field (@compliance_fields) {
             next if ( not defined( $self->{$field} ) );
 
-            if (    $field eq 'ftype'
-                and $self->{ftype} =~ /[fvel]/
-                and $pkgmap_entry->{ftype} eq 'f' )
+            if ( ( $self->is_regular_file() or $self->is_hardlink() )
+                and $pkgmap_entry->is_regular_file() )
             {
 
-                # A pkgmap entry of file type e, f, l or v just look like
-                # a regular file so we must consider that it's ok as long
-                # as the file installed is a regular file
+                # A pkgmap entry of file type e, f, v or l just look like
+                # a regular file on the filesystem so we must consider that it's ok
                 next;
             }
 
@@ -1310,7 +1291,6 @@ use 5.010001;
             {
 
                 my $package_entry = Package::Entry->new_from_line( $line, 'contents' );
-                $package_entry->set_package_owners($pkginst);
                 push( @pkgmap_entries, $package_entry );
             }
         }
@@ -1350,7 +1330,7 @@ use 5.010001;
             # to be owned by more than one package
             if ( $pkgmap_entry->is_directory() ) {
                 my $old_pkgmap_entry = Package::Entry->new_from_line( $contents[$idx], 'contents' );
-                $pkgmap_entry->add_package_owners( $old_pkgmap_entry->{packages} );
+                $pkgmap_entry->add_owners( @{ $old_pkgmap_entry->{packages} } );
             }
 
         } else {
@@ -1398,7 +1378,7 @@ use 5.010001;
         # more than one package, so we just remove the pkginsts
         if ( $pkgmap_entry->is_directory() ) {
             my $new_pkgmap_entry = Package::Entry->new_from_line( $contents[$idx], 'contents' );
-            $new_pkgmap_entry->remove_package_owners( $pkgmap_entry->{packages} );
+            $new_pkgmap_entry->remove_owners( @{ $pkgmap_entry->{packages} } );
             if ( @{ $new_pkgmap_entry->{packages} } ) {
                 $contents[$idx] = $new_pkgmap_entry->as_contents_line();
                 $do_delete = 0;
