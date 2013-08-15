@@ -9,3 +9,5 @@ Class action script package removal      | remove  CSWpca.pkg      | filesystem 
 
 Double installation                      | install CSWcommon.pkg install CSWcommon.pkg | filesystem |
 Double removal                           | remove CSWcommon.pkg remove CSWcommon.pkg   | filesystem |
+
+Removal of package with reverse dependencies | remove CSWcommon.pkg    | filesystem | Class action script package installation
