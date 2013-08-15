@@ -119,7 +119,8 @@ my %path_mappings = ( '/usr/sadm/install' => '/var/sadm/install', );
 my @pkginfo_exclusions = (
     qr{^OAMBASE=},                              # I don't know what it is
     qr{^PATH=},                                 # We maintain a different PATH to include our binaries
-    qr{^PKGSAV},                                # We don't create a package spool save directory
+    qr{^PKGSAV=},                               # We don't create a package spool save directory
+    qr{^INSTDATE=},                             # INSTDATE change each minute
 );
 
 #############################################################################
