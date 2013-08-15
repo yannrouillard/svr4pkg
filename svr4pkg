@@ -1254,8 +1254,7 @@ use 5.010001;
         my ( $self, $pkginst ) = @_;
         my @pkgmap_entries;
 
-        open( my $fh, '<', $self->{content_file} )
-          or croak( 'ERROR: Can\'t open ' . $self->{content_file} );
+        open( my $fh, '<', $self->{content_file} ) or croak( 'ERROR: Can\'t open ' . $self->{content_file} );
         while ( my $line = <$fh> ) {
             chomp($line);
             next if ( $line =~ /^#/ );
@@ -1413,7 +1412,7 @@ use 5.010001;
             $package->put_parameter( 'UPDATE', 'yes' );
         }
 
-        $self->_verbose( '## Installing package ' . $package->{pkginst} . "\n" );
+        $self->_verbose( '## Installing package ' . $package->{pkginst} );
 
         $self->_verbose('## Registering the package');
         $self->_register_package($package);
@@ -1699,7 +1698,7 @@ sub info_cmd {
 $available_commands{'pkgadd'}     = \&add_cmd;
 $commands_options_specs{'pkgadd'} = {
     'device' => { 'spec' => 'd=s', 'default' => '/var/spool/pkg' },
-    'trace'  => { 'spec' => 'd',   'default' => 0 },
+    'trace'  => { 'spec' => 'v',   'default' => 0 },
 };
 
 sub add_cmd {
@@ -1736,13 +1735,10 @@ sub add_cmd {
     }
 }
 
-## removef command ######################################################
+## pkgrm command ######################################################
 
-$available_commands{'pkgrm'}     = \&rm_cmd;
-$commands_options_specs{'pkgrm'} = {
-    'root_path' => { 'spec' => 'R=s', 'default' => '/' },
-    'trace'     => { 'spec' => 'd',   'default' => 0 },
-};
+$available_commands{'pkgrm'} = \&rm_cmd;
+$commands_options_specs{'pkgrm'} = { 'trace' => { 'spec' => 'v', 'default' => 0 }, };
 
 sub rm_cmd {
 
@@ -1782,11 +1778,8 @@ sub rm_cmd {
 
 ## pkgparam command ######################################################
 
-$available_commands{pkgparam}     = \&param_cmd;
-$commands_options_specs{pkgparam} = {
-    'device'    => { 'spec' => 'd=s', 'default' => '/var/sadm/pkg' },
-    'root_path' => { 'spec' => 'R=s', 'default' => '/' },
-};
+$available_commands{pkgparam} = \&param_cmd;
+$commands_options_specs{pkgparam} = { 'device' => { 'spec' => 'd=s', 'default' => '/var/sadm/pkg' }, };
 
 sub param_cmd {
 
@@ -1972,11 +1965,24 @@ svr4 package tools, so that it's easy to install svr4 packages on these systems.
 
 =head1 WARNING
 
-svr4pkg must not be used on a system where pkgadd, pkgrm are available. svr4pkg is not
+Svr4pkg must not be used on a system where pkgadd, pkgrm are available. svr4pkg is not
 guaranteed to be fully compatible with solaris native tools so you could mess badly
 with the package database if you use both tools on the same system.
 
 =head1 OPTIONS
+
+The following options are implemented:
+
+ - common options: -R
+ - pkagadd:        -d, -v
+ - pkgrm:          -d, -v
+ - pkgchk:         -d
+ - pkginfo:        -d, -l
+ - installf:       -c
+ - removef:
+
+ Please refer to the man page of the original Solaris tools to know more about the
+ various options.
 
 =back
 
