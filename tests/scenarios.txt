@@ -6,3 +6,5 @@ Simple package installation              | install CSWcommon.pkg   | filesystem 
 Simple package removal                   | remove  CSWcommon.pkg   | filesystem | Simple package installation
 Class action script package installation | install CSWpca.pkg      | filesystem | install CSWcommon.pkg install CSWcas-cpsampleconf.pkg
 Class action script package removal      | remove  CSWpca.pkg      | filesystem | Class action script package installation
+
+Double installation                      | install CSWcommon.pkg install CSWcommon.pkg | filesystem |
