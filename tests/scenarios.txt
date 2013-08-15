@@ -1,0 +1,8 @@
+# This files contains the list of test scenarios to launch o
+#
+# Each line has the following format:
+# Name of the test                       | Actions to be performed | Comparison test | Prerequisites before running the test
+Simple package installation              | install CSWcommon.pkg   | filesystem | 
+Simple package removal                   | remove  CSWcommon.pkg   | filesystem | Simple package installation
+Class action script package installation | install CSWpca.pkg      | filesystem | install CSWcommon.pkg install CSWcas-cpsampleconf.pkg
+Class action script package removal      | remove  CSWpca.pkg      | filesystem | Class action script package installation

@@ -1,7 +1,7 @@
 severity = brutal
 
 [InputOutput::RequireBriefOpen]
-lines = 25
+lines = 30
 
 # Not so easy to detect when a regular expression
 # needs to be detailled, the size is surely not
@@ -11,6 +11,10 @@ minimum_regex_length_to_complain_about = 40
 
 [ValuesAndExpressions::ProhibitMagicNumbers]
 allowed_values = 0 1 2 8 256
+
+# We allow $} to workaround false positive in regex
+[Variables::ProhibitPunctuationVars]
+allow = $}
 
 [InputOutput::RequireCheckedSyscalls]
 exclude_functions = print

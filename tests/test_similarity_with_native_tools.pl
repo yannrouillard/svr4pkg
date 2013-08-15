@@ -27,9 +27,11 @@
 use Test::More;
 use File::Basename qw(basename);
 use File::Path qw(remove_tree);
+use File::Spec::Functions qw(catfile);
 use File::Temp;
 use File::Find qw(find);
 use List::Util qw(first);
+use Carp qw(croak);
 use 5.010001;
 
 use strict;
@@ -39,7 +41,7 @@ use warnings;
 # Useful functions
 #############################################################################
 
-##
+#############################################################################
 # A set of functions to create, clean/destroy and take a
 # snapshot of a temporary directoru where the test packages
 # will be installed and removed
@@ -120,10 +122,12 @@ my @pkginfo_exclusions = (
     qr{^PKGSAV},                                # We don't create a package spool save directory
 );
 
+#############################################################################
 # This function store the state of the root file system used to install
 # the package, taking into account some special files (pkginfo,
 # /var/sadm/install/contents...) and excluding the files or directories
 # not relevant.
+
 sub snapshot_playground {
     my ($playground_path) = @_;
     my $snapshot = {
@@ -176,7 +180,8 @@ sub snapshot_playground {
     return ($snapshot);
 }
 
-##
+
+#############################################################################
 # A set of functions to play some standard package operations
 # individually or as part of a scenario
 #
@@ -202,7 +207,6 @@ sub perform_operation {
     push( @options, ( '-R', $playground_path ) );
 
     if ( $mode eq 'native' ) {
-
         # Quiet mode
         push( @options, '-n' );
     }
@@ -221,87 +225,115 @@ sub perform_operation {
 
 # Play the given scenario
 sub play_scenario {
-    my ( $playground_path, $scenario, $packages_list, $mode ) = @_;
-    my $result = {};
+    my ( $scenario, $mode, $playground_path, $packages_path ) = @_;
+    my $result;
 
-    foreach my $action ( @{$scenario} ) {
-        my ($real_action, $modifier) = split(/\//, $action);
-        my @real_packages_list;
-        if (defined($modifier) and $modifier eq 'reverse') {
-            @real_packages_list = reverse(@{$packages_list});
-        } else {
-            @real_packages_list = @{$packages_list};
-        }
-        foreach my $package (@real_packages_list) {
-            perform_operation( $playground_path, $real_action, $package, $mode );
-        }
-        $result->{$real_action} = snapshot_playground($playground_path);
+    foreach my $step ( @{$scenario->{prerequisites}}, @{$scenario->{steps}} ) {
+        my $package = catfile($packages_path, $step->{package});
+        perform_operation( $playground_path, $step->{action}, $package, $mode );
+    }
+
+    given ($scenario->{test}) {
+        when ('filesystem') { $result = snapshot_playground($playground_path); }
+        default             { $result = undef; }
     }
 
     return ($result);
 }
 
-#############################################################################
-# Main functions
-#############################################################################
+# Parse a string of text contains the textual description 
+# of a scenario and returns it as a list of steps to perform
+# The line should have the form "action1 package1 action2 package2..."
+sub parse_scenario_steps {
+    my ( $steps_description ) = @_;
+    my @scenario_steps;
 
-my @scenario                  = qw(install remove/reverse);
-my $default_package_directory = 'tests/packages';
+    my @items = ($steps_description =~ m{(?:(\S+)\s+(\S+))}g);
+    return if (not @items);
 
-my %test_cases_and_packages;
-
-if (@ARGV) {
-
-    # If we were provided a package list of the command line
-    # we will use them to run the test scenario instead
-    $test_cases_and_packages{'CustomTest'} = \@ARGV;
-}
-else {
-
-    # Otherwise we just use the packages in the $default_package_directory
-    # The structure is:
-    # Each sub-directory is named after the kind of packages it contains
-    # e.g:  $default_package_directory/SimplePackage/Package1.pkg
-    opendir( my $dh, $default_package_directory );
-    my @test_cases = grep { $_ !~ /^[.]{1,2}$/ } readdir($dh);
-    closedir($dh);
-
-    foreach my $case (@test_cases) {
-        opendir( my $dh, "$default_package_directory/$case" );
-        my @packages = grep { $_ !~ /^[.]{1,2}$/ } readdir($dh);
-        @packages = sort (map { "$default_package_directory/$case/$_" } @packages);
-        closedir($dh);
-        $test_cases_and_packages{$case} = \@packages;
+    foreach my $index(0..@items / 2 - 1) {
+        push (@scenario_steps, { 'action'  => $items[2 * $index],
+                                 'package' => $items[2 * $index + 1] });
     }
+
+    return (\@scenario_steps);
 }
+
+
+# Parse the text file containing the list of scenario to test
+# and returns the content in a structured form
+#
+# Each line should have the form:
+#   Name of test | scenario | test | prerequisites
+#
+#  - scenario is a list of action to perform on package
+#    (see parse_scenario_steps)
+#  - test is a kind of comparison to be perform between native
+#    and svr4pkg at the end of the scenario
+#  - prerequisites can be a list of action to perform on package
+#    like scenario, or it can be the name of a previous scenario
+#
+sub parse_test_scenarios {
+    my ( $scenario_file ) = @_;
+    my @test_scenarios;
+
+    open (my $fh, '<', $scenario_file) or croak ("Can't open file $scenario_file !\n");
+    while (my $line = <$fh>) {
+        chomp ($line);
+        next if ($line =~ /^(#|\s*$)/);
+
+        my ($test_name, $scenario_description, $comparison_test, $prerequisites)
+            = split (/\s*[|]\s*/, $line);
+        return if not defined ($comparison_test);
+
+        my $scenario_steps = parse_scenario_steps ($scenario_description);
+        return if not defined ($scenario_steps);
+
+        my $prerequisites_steps = [];
+        if (defined ($prerequisites) and $prerequisites ne '') {
+            # We check wether the prerequisites are a reference to a previous scenario
+            if (my $scenario = first { $_->{name} eq $prerequisites } @test_scenarios) {
+                @{$prerequisites_steps} = (@{$scenario->{prerequisites}}, @{$scenario->{steps}});
+            } else {
+                $prerequisites_steps = parse_scenario_steps ($prerequisites);
+            }
+        }
+
+       push (@test_scenarios, { name          => $test_name,
+                                steps         => $scenario_steps,
+                                test          => $comparison_test,
+                                prerequisites => $prerequisites_steps,
+                               });
+    }
+    close ($fh) or croak ("Can't close file $scenario_file !\n");
+
+    return (\@test_scenarios);
+}
+
+#############################################################################
+# Main program
+#############################################################################
+
+my $scenarios_file = 'tests/scenarios.txt';
+my $packages_path  = 'tests/packages';
 
 my $playground_path = create_playground();
 
-foreach my $test_case ( keys(%test_cases_and_packages) ) {
+my $test_scenarios  = parse_test_scenarios($scenarios_file);
+foreach my $scenario (@{$test_scenarios}) {
 
-    my $packages_list = $test_cases_and_packages{$test_case};
-
-    # Foreach package we play the list of actions specified in scenario,
-    # First we the native tools then with svr4pkg
-    # We register the state of the root system after each and we compare
-    # them after
+    # We play each scenario first with the native tools then with svr4pkg
+    # then we will compare the results of the two runs
 
     clean_playground( $playground_path, 'reset' );
-    my $native_results = play_scenario( $playground_path, \@scenario, $packages_list, 'native' );
+    my $native_results  = play_scenario( $scenario, 'native', $playground_path, $packages_path );
 
     clean_playground( $playground_path, 'reset' );
-    my $svr4pkg_results = play_scenario( $playground_path, \@scenario, $packages_list, 'svr4pkg' );
+    my $svr4pkg_results = play_scenario( $scenario, 'svr4pkg', $playground_path, $packages_path );
 
-    foreach my $action (@scenario) {
-        my ($real_action) = ($action =~ m/^([^\/]+)/);
-        is_deeply(
-            $svr4pkg_results->{$action},
-            $native_results->{$action},
-            "$test_case $real_action",
-        );
-    }
+    is_deeply( $svr4pkg_results, $native_results, $scenario->{name} );
 }
-
 done_testing();
+
 clean_playground( $playground_path, 'full' );
 
