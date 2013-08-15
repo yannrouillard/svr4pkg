@@ -1467,6 +1467,8 @@ use 5.010001;
 
         $self->_verbose('## Executing postinstall script');
         $package->execute_procedure_script('postinstall');
+
+        return ( SUCCESS, undef );
     }
 
     #
@@ -1479,8 +1481,24 @@ use 5.010001;
     #              must be installed.
     #
     sub remove_package {
-        my ( $self, $package ) = @_;
+        my ( $self, $package, $options ) = @_;
         my $dest = $self->{root_path};
+
+        # We first check if there is some installed packages that depend
+        # on this one
+        if ( not( $options->{force} ) ) {
+            my @dependent_packages;
+            foreach my $pkginst ( @{ $self->list_installed_packages() } ) {
+                next if ( $pkginst eq $package->{pkginst} );
+                my $installed_package = $self->get_package($pkginst);
+                if ( first { $_ eq $package->{pkginst} } @{ $installed_package->{dependencies}{P} } ) {
+                    push( @dependent_packages, $pkginst );
+                }
+            }
+            if (@dependent_packages) {
+                return ( DEPENDENCY_ERROR, \@dependent_packages );
+            }
+        }
 
         $self->_verbose( '## Removing package ' . $package->{pkginst} . "\n" );
 
@@ -1497,6 +1515,7 @@ use 5.010001;
         $self->_verbose('## Unregistering the package');
         $self->_unregister_package($package);
 
+        return ( SUCCESS, undef );
     }
 
     ## Private methods
@@ -1772,7 +1791,22 @@ sub rm_cmd {
     }
 
     foreach my $package (@packages_list) {
-        $package_manager->remove_package( $package, '/' );
+        my ( $ret, $info ) = $package_manager->remove_package($package);
+
+        if ( $ret == Package::Manager::DEPENDENCY_ERROR ) {
+            print( 'The following packages depend on ' . $package->{pkginst} . ":\n" );
+
+            # In that case, $info is a reference to a list of dependent packages
+            print( join( "\n", map { "\t$_" } @{$info} ) . "\n\n" );
+
+            if ( is_interactive() ) {
+                print 'Would you like to remove the package anyway (y/n) ? ';
+                my $answer = <STDIN>;
+                if ( $answer =~ /^[Yy]$/ ) {
+                    ( $ret, $info ) = $package_manager->remove_package( $package, { force => 1 } );
+                }
+            }
+        }
     }
 }
 
