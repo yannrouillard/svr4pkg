@@ -8,3 +8,4 @@ Class action script package installation | install CSWpca.pkg      | filesystem 
 Class action script package removal      | remove  CSWpca.pkg      | filesystem | Class action script package installation
 
 Double installation                      | install CSWcommon.pkg install CSWcommon.pkg | filesystem |
+Double removal                           | remove CSWcommon.pkg remove CSWcommon.pkg   | filesystem |
