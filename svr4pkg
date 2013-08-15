@@ -80,16 +80,16 @@ use 5.010001;
             'i' => [qw(part ftype pathname size cksum modtime)],
         },
         'contents' => {
-            'd' => [qw(pathname ftype class mode owner group)],
-            'x' => [qw(pathname ftype class mode owner group)],
-            's' => [qw(pathname ftype class)],
-            'l' => [qw(pathname ftype class)],
-            'f' => [qw(pathname ftype class mode owner group size cksum modtime)],
-            'v' => [qw(pathname ftype class mode owner group size cksum modtime)],
-            'e' => [qw(pathname ftype class mode owner group size cksum modtime)],
-            'p' => [qw(pathname ftype class mode owner group size cksum modtime)],
-            'b' => [qw(pathname ftype class major minor owner group)],
-            'c' => [qw(pathname ftype class major minor owner group)],
+            'd' => [qw(pathname ftype class mode owner group packages)],
+            'x' => [qw(pathname ftype class mode owner group packages)],
+            's' => [qw(pathname ftype class packages)],
+            'l' => [qw(pathname ftype class packages)],
+            'f' => [qw(pathname ftype class mode owner group size cksum modtime packages)],
+            'v' => [qw(pathname ftype class mode owner group size cksum modtime packages)],
+            'e' => [qw(pathname ftype class mode owner group size cksum modtime packages)],
+            'p' => [qw(pathname ftype class mode owner group size cksum modtime packages)],
+            'b' => [qw(pathname ftype class major minor owner group packages)],
+            'c' => [qw(pathname ftype class major minor owner group packages)],
 
             # No information files in the /var/sadm/install/contents file
         },
@@ -129,11 +129,12 @@ use 5.010001;
     #   $fields      -
     #
     sub new {
-        my ( $class, $ftype, $fields, $pkginst ) = @_;
+        my ( $class, $format, $ftype, $fields, $pkginst ) = @_;
         my $self = {};
 
         my %pkgmap_fields =
-          map { $_ => 1 } @{ $line_format_for{'pkgmap'}{$ftype} };
+          map { $_ => 1 } @{ $line_format_for{$format}{$ftype} };
+
         foreach my $field (@package_entry_fields) {
             $self->{$field} =
                 ( not exists( $pkgmap_fields{$field} ) ) ? undef
@@ -182,14 +183,13 @@ use 5.010001;
         # initialize the attributes accordingly
         my $field_name_at = $line_format_for{$format}{$ftype};
         foreach my $index ( 0 .. $#{$field_name_at} ) {
-            $fields{ $field_name_at->[$index] } = $pkgmap_values[$index];
+            $fields{ $field_name_at->[$index] } = shift (@pkgmap_values);
         }
-        if ( $format eq 'content' ) {
-            my @packages = @pkgmap_values[ $#{$field_name_at} + 1 .. $#pkgmap_values ];
-            $fields{packages} = \@packages;
+        if ( $format eq 'contents' ) {
+            $fields{packages} = [ $fields{packages}, @pkgmap_values ];
         }
 
-        return ( new( $class, $ftype, \%fields, $pkginst ) );
+        return ( new( $class, $format, $ftype, \%fields, $pkginst ) );
     }
 
     #
@@ -222,7 +222,7 @@ use 5.010001;
         }
 
         $file_fields{ keys( %{$fields} ) } = values( %{$fields} );
-        return ( new( $class, $file_fields{ftype}, \%file_fields, $pkginst ) );
+        return ( new( $class, 'pkgmap', $file_fields{ftype}, \%file_fields, $pkginst ) );
     }
 
     #
@@ -290,8 +290,11 @@ use 5.010001;
 
         my $pkginsts = $self->{packages};
 
-        my $contents_line_fields = $line_format_for{'contents'}{ $self->{ftype} };
-        return join( ' ', ( map ( { $self->{$_} } @{$contents_line_fields} ), @{$pkginsts} ) );
+        my @contents_line_fields = @{$line_format_for{'contents'}{ $self->{ftype} }};
+        # We remove the last one, packages, because we handle it differently
+        pop (@contents_line_fields);
+        my $line = join( ' ', ( map ( { $self->{$_} } @contents_line_fields ), @{$pkginsts} ) );
+        return ($line);
     }
 
     #
@@ -301,12 +304,10 @@ use 5.010001;
     #   @pkginsts - the list of SVR4 package names that own this entry
     #
     sub add_package_owners {
-        my ( $self, @pkginsts ) = @_;
+        my ( $self, $pkginsts ) = @_;
 
-        foreach my $pkginst (@pkginsts) {
-            if ( first { $_ eq $pkginst } @{ $self->{packages} } ) {
-                continue;
-            }
+        foreach my $pkginst (@{$pkginsts}) {
+            next if ( first { $_ eq $pkginst } @{ $self->{packages} } );
             push( @{ $self->{packages} }, $pkginst );
         }
     }
@@ -331,13 +332,11 @@ use 5.010001;
     #               entry anymore
     #
     sub remove_package_owners {
-        my ( $self, @pkginsts ) = @_;
+        my ( $self, $pkginsts ) = @_;
 
         my @packages;
         foreach my $pkginst ( @{ $self->{packages} } ) {
-            if ( first { $_ eq $pkginst } @pkginsts ) {
-                continue;
-            }
+            next if ( first { $_ eq $pkginst } @{$pkginsts} );
             push( @packages, $pkginst );
         }
         $self->{packages} = \@packages;
@@ -1456,6 +1455,10 @@ use 5.010001;
             }
         }
 
+        if ($self->is_package_installed($package->{pkginst})) {
+            $package->{pkginfo}{UPDATE} = 'yes';
+        }
+
         $self->_verbose('## Installing package ' . $package->{pkginst} . "\n");
 
         $self->_verbose('## Registering the package');
@@ -1596,12 +1599,18 @@ use 5.010001;
         foreach my $pkgmap_entry ( sort ( @{$package->{pkgmap}}) ) {
 
             ( $idx, $filename_at_idx ) = $self->_find_insert_position( \@contents, $pkgmap_entry, $idx );
+
             # we check if the given path is already registered in the database,
             # or if the file is present on the filesystem
-            if ( $filename_at_idx eq $pkgmap_entry->{filename} or
-                    -e $package->_build_path($pkgmap_entry, $dest) ) {
-                push(@conflicts, $pkgmap_entry->{filename});
+            if ( $filename_at_idx eq $pkgmap_entry->{filename} ) {
+                my $contents_entry = Package::Entry->new_from_line ( $contents[$idx], 'contents' );
+                next if (first { $_ eq $package->{pkginst} } @{$contents_entry->{packages}});
+
+            } else {
+                next if (not ( -e $package->_build_path($pkgmap_entry, $dest) ) );
             }
+
+            push(@conflicts, $pkgmap_entry->{filename});
         }
         untie(@contents);
 
