@@ -1074,7 +1074,7 @@ use 5.010001;
         $action_script = $self->_relocate_path_in_script($action_script);
 
         local @ENV{ keys( %{ $self->{pkginfo} } ) } = values( %{ $self->{pkginfo} } );
-        open( my $fh, '|', $action_script )
+        open( my $fh, '|-', $action_script )
           or croak("ERROR: can't run script $action_script !");
 
         foreach my $pkgmap_entry ( @{$pkgmap_entries} ) {
@@ -1494,7 +1494,8 @@ use 5.010001;
         $package->execute_procedure_script('preremove');
 
         $self->_verbose('## Removing package files');
-        $package->remove_files( $dest, $self->{action_scripts_location} );
+        my $action_scripts_location = catfile($self->{root_path}, $self->{action_scripts_location});
+        $package->remove_files( $dest, $action_scripts_location );
 
         $self->_verbose('## Executing postremove script');
         $package->execute_procedure_script('postremove');
