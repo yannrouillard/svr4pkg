@@ -111,15 +111,13 @@ my @excluded_files_or_directory = (
     qr{/usr$}x,
 );
 
-my %path_mappings = (
-    '/usr/sadm/install' => '/var/sadm/install',
-);
+my %path_mappings = ( '/usr/sadm/install' => '/var/sadm/install', );
 
 # We will not compare this parameters of the pkginfo files
 my @pkginfo_exclusions = (
-    qr{^OAMBASE=},                              # I don't know what it is
-    qr{^PATH=},                                 # We maintain a different PATH to include our binaries
-    qr{^PKGSAV},                                # We don't create a package spool save directory
+    qr{^OAMBASE=},    # I don't know what it is
+    qr{^PATH=},       # We maintain a different PATH to include our binaries
+    qr{^PKGSAV},      # We don't create a package spool save directory
 );
 
 #############################################################################
@@ -145,14 +143,15 @@ sub snapshot_playground {
 
         # Some files are special and deserve a special treatment
         # (e.g. pkginfo, /var/sadm/install/contents...)
-        if ($fullname eq '/var/sadm/install/contents') {
-            $snapshot->{'contents file'} = read_into_array(
-                $realpath, { exclude => [qr{^#}] });
+        if ( $fullname eq '/var/sadm/install/contents' ) {
+            $snapshot->{'contents file'} =
+              read_into_array( $realpath, { exclude => [qr{^#}] } );
             return;
         }
-        if ($fullname =~ qr{/var/sadm/pkg/([^/]+)/pkginfo}x) {
-            $snapshot->{'pkginfo files'}{$1} = read_into_array(
-                $realpath, { sorted => 1, exclude => \@pkginfo_exclusions });
+        if ( $fullname =~ qr{/var/sadm/pkg/([^/]+)/pkginfo}x ) {
+            $snapshot->{'pkginfo files'}{$1} =
+              read_into_array( $realpath,
+                { sorted => 1, exclude => \@pkginfo_exclusions } );
             return;
         }
 
@@ -162,13 +161,13 @@ sub snapshot_playground {
             return if ( $fullname =~ $file_pattern );
         }
 
-        # We transform some path that are always different between native and svr4pkg
-        foreach my $path ( keys( %path_mappings ) ) {
+   # We transform some path that are always different between native and svr4pkg
+        foreach my $path ( keys(%path_mappings) ) {
             my $new_path = $path_mappings{$path};
             $fullname =~ s/^$path/$new_path/;
         }
 
-        # We register the list of files, the content of files (through a simple checksum)
+# We register the list of files, the content of files (through a simple checksum)
         $snapshot->{'file listing'}{$fullname} = 1;
         if ( -f "$realpath" ) {
             $snapshot->{'file content'}{$fullname} = cksum_file($realpath);
@@ -179,7 +178,6 @@ sub snapshot_playground {
 
     return ($snapshot);
 }
-
 
 #############################################################################
 # A set of functions to play some standard package operations
@@ -207,6 +205,7 @@ sub perform_operation {
     push( @options, ( '-R', $playground_path ) );
 
     if ( $mode eq 'native' ) {
+
         # Quiet mode
         push( @options, '-n' );
     }
@@ -228,12 +227,14 @@ sub play_scenario {
     my ( $scenario, $mode, $playground_path, $packages_path ) = @_;
     my $result;
 
-    foreach my $step ( @{$scenario->{prerequisites}}, @{$scenario->{steps}} ) {
-        my $package = catfile($packages_path, $step->{package});
+    foreach
+      my $step ( @{ $scenario->{prerequisites} }, @{ $scenario->{steps} } )
+    {
+        my $package = catfile( $packages_path, $step->{package} );
         perform_operation( $playground_path, $step->{action}, $package, $mode );
     }
 
-    given ($scenario->{test}) {
+    given ( $scenario->{test} ) {
         when ('filesystem') { $result = snapshot_playground($playground_path); }
         default             { $result = undef; }
     }
@@ -241,24 +242,28 @@ sub play_scenario {
     return ($result);
 }
 
-# Parse a string of text contains the textual description 
+# Parse a string of text contains the textual description
 # of a scenario and returns it as a list of steps to perform
 # The line should have the form "action1 package1 action2 package2..."
 sub parse_scenario_steps {
-    my ( $steps_description ) = @_;
+    my ($steps_description) = @_;
     my @scenario_steps;
 
-    my @items = ($steps_description =~ m{(?:(\S+)\s+(\S+))}g);
-    return if (not @items);
+    my @items = ( $steps_description =~ m{(?:(\S+)\s+(\S+))}g );
+    return if ( not @items );
 
-    foreach my $index(0..@items / 2 - 1) {
-        push (@scenario_steps, { 'action'  => $items[2 * $index],
-                                 'package' => $items[2 * $index + 1] });
+    foreach my $index ( 0 .. @items / 2 - 1 ) {
+        push(
+            @scenario_steps,
+            {
+                'action'  => $items[ 2 * $index ],
+                'package' => $items[ 2 * $index + 1 ]
+            }
+        );
     }
 
-    return (\@scenario_steps);
+    return ( \@scenario_steps );
 }
-
 
 # Parse the text file containing the list of scenario to test
 # and returns the content in a structured form
@@ -274,40 +279,52 @@ sub parse_scenario_steps {
 #    like scenario, or it can be the name of a previous scenario
 #
 sub parse_test_scenarios {
-    my ( $scenario_file ) = @_;
+    my ($scenario_file) = @_;
     my @test_scenarios;
 
-    open (my $fh, '<', $scenario_file) or croak ("Can't open file $scenario_file !\n");
-    while (my $line = <$fh>) {
-        chomp ($line);
-        next if ($line =~ /^(#|\s*$)/);
+    open( my $fh, '<', $scenario_file )
+      or croak("Can't open file $scenario_file !\n");
+    while ( my $line = <$fh> ) {
+        chomp($line);
+        next if ( $line =~ /^(#|\s*$)/ );
 
-        my ($test_name, $scenario_description, $comparison_test, $prerequisites)
-            = split (/\s*[|]\s*/, $line);
-        return if not defined ($comparison_test);
+        my (
+            $test_name,       $scenario_description,
+            $comparison_test, $prerequisites
+        ) = split( /\s*[|]\s*/, $line );
+        return if not defined($comparison_test);
 
-        my $scenario_steps = parse_scenario_steps ($scenario_description);
-        return if not defined ($scenario_steps);
+        my $scenario_steps = parse_scenario_steps($scenario_description);
+        return if not defined($scenario_steps);
 
         my $prerequisites_steps = [];
-        if (defined ($prerequisites) and $prerequisites ne '') {
+        if ( defined($prerequisites) and $prerequisites ne '' ) {
+
             # We check wether the prerequisites are a reference to a previous scenario
-            if (my $scenario = first { $_->{name} eq $prerequisites } @test_scenarios) {
-                @{$prerequisites_steps} = (@{$scenario->{prerequisites}}, @{$scenario->{steps}});
-            } else {
-                $prerequisites_steps = parse_scenario_steps ($prerequisites);
+            if ( my $scenario =
+                first { $_->{name} eq $prerequisites } @test_scenarios )
+            {
+                @{$prerequisites_steps} =
+                    ( @{ $scenario->{prerequisites} }, @{ $scenario->{steps} } );
+            }
+            else {
+                $prerequisites_steps = parse_scenario_steps($prerequisites);
             }
         }
 
-       push (@test_scenarios, { name          => $test_name,
-                                steps         => $scenario_steps,
-                                test          => $comparison_test,
-                                prerequisites => $prerequisites_steps,
-                               });
+        push(
+            @test_scenarios,
+            {
+                name          => $test_name,
+                steps         => $scenario_steps,
+                test          => $comparison_test,
+                prerequisites => $prerequisites_steps,
+            }
+        );
     }
-    close ($fh) or croak ("Can't close file $scenario_file !\n");
+    close($fh) or croak("Can't close file $scenario_file !\n");
 
-    return (\@test_scenarios);
+    return ( \@test_scenarios );
 }
 
 #############################################################################
@@ -319,17 +336,19 @@ my $packages_path  = 'tests/packages';
 
 my $playground_path = create_playground();
 
-my $test_scenarios  = parse_test_scenarios($scenarios_file);
-foreach my $scenario (@{$test_scenarios}) {
+my $test_scenarios = parse_test_scenarios($scenarios_file);
+foreach my $scenario ( @{$test_scenarios} ) {
 
     # We play each scenario first with the native tools then with svr4pkg
     # then we will compare the results of the two runs
 
     clean_playground( $playground_path, 'reset' );
-    my $native_results  = play_scenario( $scenario, 'native', $playground_path, $packages_path );
+    my $native_results =
+      play_scenario( $scenario, 'native', $playground_path, $packages_path );
 
     clean_playground( $playground_path, 'reset' );
-    my $svr4pkg_results = play_scenario( $scenario, 'svr4pkg', $playground_path, $packages_path );
+    my $svr4pkg_results =
+      play_scenario( $scenario, 'svr4pkg', $playground_path, $packages_path );
 
     is_deeply( $svr4pkg_results, $native_results, $scenario->{name} );
 }

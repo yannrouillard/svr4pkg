@@ -1,7 +1,7 @@
 severity = brutal
 
 [InputOutput::RequireBriefOpen]
-lines = 30
+lines = 40
 
 # Not so easy to detect when a regular expression
 # needs to be detailled, the size is surely not

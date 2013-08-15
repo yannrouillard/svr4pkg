@@ -664,7 +664,7 @@ use 5.010001;
 
         my @classes = split( /\s+/, $self->{pkginfo}{CLASSES} );
 
-        # The none class is always processed first
+        # The none class is always processed last
         @classes = reverse( 'none', grep { $_ ne 'none' } @classes );
 
         foreach my $class (@classes) {
