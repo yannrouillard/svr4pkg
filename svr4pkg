@@ -1218,7 +1218,7 @@ use 5.010001;
         }
 
         return if ( not defined($pkg_name) );
-        return ($pkg_name);
+        return ( SUCCESS, $pkg_name );
     }
 
     #
@@ -1240,7 +1240,7 @@ use 5.010001;
         my @installed_pkgs = grep { $_ !~ /^[.]{1,2}$/ } readdir($pkgdir);
         closedir($pkgdir);
 
-        return ( \@installed_pkgs );
+        return ( SUCCESS, \@installed_pkgs );
     }
 
     #
@@ -1279,7 +1279,7 @@ use 5.010001;
         }
         close($fh);
 
-        return ( \@pkgmap_entries );
+        return ( SUCCESS, \@pkgmap_entries );
     }
 
     #
@@ -1327,7 +1327,7 @@ use 5.010001;
         $contents[$idx] = $pkgmap_entry->as_contents_line();
         untie(@contents);
 
-        return ($idx);
+        return ( SUCCESS, $idx );
 
     }
 
@@ -1375,7 +1375,7 @@ use 5.010001;
         }
         untie(@contents);
 
-        return ($idx);
+        return ( SUCCESS, $idx );
     }
 
     #
@@ -1675,8 +1675,15 @@ $commands_options_specs{'pkginfo'} = {
 sub info_cmd {
 
     my ( $package_manager, $options, @arguments ) = @_;
+    my $package_names;
 
-    my $package_names = @arguments ? \@arguments : $package_manager->list_installed_packages();
+    if (@arguments) {
+        $package_names = \@arguments;
+    } else {
+        my ( $ret, $info ) = $package_manager->list_installed_packages();
+        $package_names = $info;
+    }
+
     foreach my $package_name ( @{$package_names} ) {
         my $package = $package_manager->get_package( $package_name, $options->{device} );
         if ( not defined($package) ) {
@@ -1810,12 +1817,19 @@ my %field_display_name = (
 );
 
 sub chk_cmd {
-
     my ( $package_manager, $options, @arguments ) = @_;
+    my $package_names;
 
-    my $package_names = @arguments ? \@arguments : $package_manager->list_installed_packages();
+    if (@arguments) {
+        $package_names = \@arguments;
+    } else {
+        my ( $ret, $info ) = $package_manager->list_installed_packages();
+        $package_names = $info;
+    }
+
     foreach my $pkginst ( @{$package_names} ) {
         my $package = $package_manager->get_package( $pkginst, $options->{device} );
+
         foreach my $entry_error ( @{ $package->check_installed_files( $options->{root_path} ) } ) {
             my $package_entry = $entry_error->{package_entry};
             printf STDERR ( "ERROR: %s\n", ( $package_entry->{filename} ) );
@@ -1856,7 +1870,7 @@ sub installf_cmd {
     }
 
     my $pkgmap_entry = Package::Entry->new_from_file( $pathname, \%fields, $pkginst );
-    $package_manager->register_file($pkgmap_entry);
+    my ( $ret, $info ) = $package_manager->register_file($pkgmap_entry);
 }
 
 ## removef_cmd command ######################################################
@@ -1877,7 +1891,7 @@ sub removef_cmd {
     foreach my $pathname (@pathnames) {
         my $pkgmap_entry = first { $_->{filename} eq $pathname } @{$package_entries};
         next if ( not defined($pkgmap_entry) );
-        $package_manager->unregister_file( $pkgmap_entry, $pkginst );
+        my ( $ret, $info ) = $package_manager->unregister_file( $pkgmap_entry, $pkginst );
     }
 }
 
