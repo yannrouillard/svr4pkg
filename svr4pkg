@@ -746,7 +746,7 @@ use 5.010001;
         local @ENV{ keys( %{ $self->{pkginfo} } ) } = values( %{ $self->{pkginfo} } );
         my $ret = system(@command);
         if ($response_file) {
-            $self->_load_pkginfo( $response_file, { append => 1 } );
+            $self->_load_pkginfo( { append => 1, filename => $response_file } );
         }
         return ($ret);
     }
@@ -777,10 +777,16 @@ use 5.010001;
     #
     sub _load_pkginfo {
         my ( $self, $options ) = @_;
-        my $pkginfo_file = catfile( $self->{path}, $self->{pkginst}, 'pkginfo' );
+        my $pkginfo_file;
 
-        if ( not $options->{append} ) {
+        if ( exists( $options->{append} ) and not $options->{append} ) {
             $self->{pkginfo} = {};
+        }
+
+        if ( exists( $options->{filename} ) and $options->{filename} ) {
+            $pkginfo_file = $options->{filename};
+        } else {
+            $pkginfo_file = catfile( $self->{path}, $self->{pkginst}, 'pkginfo' );
         }
 
         open( my $fh, '<', $pkginfo_file ) or return;
