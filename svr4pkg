@@ -471,6 +471,7 @@ use 5.010001;
             dependencies    => {},
             path_mappings   => {},
             statistics      => undef,
+            trace           => 0,
         };
 
         # Handling optional arguments
@@ -1048,9 +1049,10 @@ use 5.010001;
         my ( $self, $pkgmap_entries, $dest, $action_script ) = @_;
 
         $action_script = $self->_relocate_path_in_script($action_script);
+        my $command = $self->{trace} ? "sh -x $action_script" : $action_script;
 
         local @ENV{ keys( %{ $self->{pkginfo} } ) } = values( %{ $self->{pkginfo} } );
-        open( my $fh, '|-', $action_script ) or croak("ERROR: can't run $action_script !");
+        open( my $fh, '|-', $command ) or croak("ERROR: can't run $action_script !");
 
         foreach my $pkgmap_entry ( @{$pkgmap_entries} ) {
 
@@ -1079,9 +1081,10 @@ use 5.010001;
         my ( $self, $pkgmap_entries, $dest, $action_script ) = @_;
 
         $action_script = $self->_relocate_path_in_script($action_script);
+        my $command = $self->{trace} ? "sh -x $action_script" : $action_script;
 
         local @ENV{ keys( %{ $self->{pkginfo} } ) } = values( %{ $self->{pkginfo} } );
-        open( my $fh, '|-', $action_script ) or croak("ERROR: can't run script $action_script !");
+        open( my $fh, '|-', $command ) or croak("ERROR: can't run script $action_script !");
 
         foreach my $pkgmap_entry ( @{$pkgmap_entries} ) {
 
