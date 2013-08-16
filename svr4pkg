@@ -1146,7 +1146,6 @@ use 5.010001;
     use File::Spec::Functions qw(catfile);
     use File::Basename qw(dirname);
     use File::Path qw(make_path remove_tree);
-    use Tie::File;
     use Carp qw(croak);
 
     use constant NATIVE_ACTION_SCRIPTS_LOCATION => '/usr/sadm/install/scripts/';

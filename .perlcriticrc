@@ -33,7 +33,6 @@ exclude_functions = print
 # We will probably enable these ones later
 [-InputOutput::ProhibitBacktickOperators]
 [-Documentation::RequirePodSections]
-[-Miscellanea::ProhibitTies]
 
 # This critics are debatable
 [-ValuesAndExpressions::ProhibitNoisyQuotes]
