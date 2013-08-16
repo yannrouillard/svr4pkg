@@ -409,7 +409,7 @@ use 5.010001;
     package Package;
     use File::Copy;
     use File::Temp;
-    use File::Basename qw(dirname);
+    use File::Basename qw(dirname basename);
     use File::Path qw(make_path);
     use File::Spec::Functions qw(catfile);
     use List::Util qw(first);
@@ -463,6 +463,7 @@ use 5.010001;
         my $self = {
             path            => $path,
             pkginst         => $pkginst,
+            pkgmap_file     => catfile( $path, $pkginst, 'pkgmap' ),
             package_entries => [],
             dependencies    => {},
             path_mappings   => {},
@@ -476,7 +477,7 @@ use 5.010001;
         };
 
         # Handling optional arguments
-        foreach my $option_name (qw(path_mappings package_entries)) {
+        foreach my $option_name (qw(path_mappings pkgmap_file)) {
             if ( exists( $options->{$option_name} ) ) {
                 $self->{$option_name} = $options->{$option_name};
             }
@@ -484,7 +485,11 @@ use 5.010001;
         bless( $self, $class );
 
         $self->_load_pkginfo();
-        $self->_load_pkgmap();
+        if ( basename( $self->{pkgmap_file} ) eq 'pkgmap' ) {
+            $self->_load_pkgmap();
+        } else {
+            $self->_load_contents();
+        }
         $self->_load_depend();
 
         $self->_update_package_info();
@@ -751,6 +756,15 @@ use 5.010001;
         return ($ret);
     }
 
+    #
+    # Purpose:    Returns the list of files owned by a package
+    #             as a list of package::entry objects.
+    #
+    sub list_files {
+        my ($self) = @_;
+        return ( $self->{package_entries} );
+    }
+
     ## Private methods
 
     #
@@ -819,13 +833,10 @@ use 5.010001;
     #
     # Purpose:    Parse the pkgmap file located in the package and
     #             initialize the list of package entries.
-    #             At the end of this method, the 'pkgmap' internal
-    #             attr is properly initialized as a list of
-    #             Package::Entry objects.
     #
     sub _load_pkgmap {
         my ($self) = @_;
-        my $pkgmap_file = catfile( $self->{path}, $self->{pkginst}, 'pkgmap' );
+        my $pkgmap_file = $self->{pkgmap_file};
         return if not( -r $pkgmap_file );
 
         open( my $fh, '<', $pkgmap_file ) or croak("ERROR: can't open $pkgmap_file");
@@ -838,6 +849,44 @@ use 5.010001;
 
         }
         close($fh);
+    }
+
+    #
+    # Purpose:    Returns the list of files owned by a package
+    #             as a list of package::entry objects.
+    #
+    # Parameters:
+    #   $pkginst - the svr4 name of an installed package
+    #
+    sub _load_contents {
+        my ($self) = @_;
+        my @pkgmap_entries;
+        my $pkginst = $self->{pkginst};
+
+        open( my $fh, '<', $self->{pkgmap_file} ) or croak( 'ERROR: Can\'t open ' . $self->{pkgmap_file} );
+        while ( my $line = <$fh> ) {
+            chomp($line);
+            next if ( $line =~ /^#/ );
+
+            # We use a pragmatic test to check if the line describes a file
+            # that belongs to $pkginst, e.g. either:
+            if (
+                $line =~ m{               # either
+                        \s$pkginst\s*$    # the last field is $pkginst
+                        |                 # or
+                        \S+\sd\s          # this is directory owned by several packages
+                          (?:\S+\s){4}    # and after the 4 fields class, mode, owner, group
+                           .*\b$pkginst\b # we find $pkginst among the list of owners
+                         }x
+              )
+            {
+
+                my $package_entry = Package::Entry->new_from_line( $line, 'contents' );
+                push( @{ $self->{package_entries} }, $package_entry );
+            }
+        }
+        close($fh);
+
     }
 
     #
@@ -1190,7 +1239,7 @@ use 5.010001;
             # The package is a local one, so it doesn't have a
             # pkgmap file and the file information are stored in
             # the /var/sadm/install/contents file
-            $options->{package_entries} = $self->list_installed_files($pkginst);
+            $options->{pkgmap_file} = $self->{content_file};
         }
 
         return if ( not defined($pkginst) );
@@ -1260,44 +1309,6 @@ use 5.010001;
         closedir($pkgdir);
 
         return ( SUCCESS, \@installed_pkgs );
-    }
-
-    #
-    # Purpose:    Returns the list of files owned by a package
-    #             as a list of package::entry objects.
-    #
-    # Parameters:
-    #   $pkginst - the svr4 name of an installed package
-    #
-    sub list_installed_files {
-        my ( $self, $pkginst ) = @_;
-        my @pkgmap_entries;
-
-        open( my $fh, '<', $self->{content_file} ) or croak( 'ERROR: Can\'t open ' . $self->{content_file} );
-        while ( my $line = <$fh> ) {
-            chomp($line);
-            next if ( $line =~ /^#/ );
-
-            # We use a pragmatic test to check if the line describes a file
-            # that belongs to $pkginst, e.g. either:
-            if (
-                $line =~ m{               # either
-                        \s$pkginst\s*$    # the last field is $pkginst
-                        |                 # or
-                        \S+\sd\s          # this is directory owned by several packages
-                          (?:\S+\s){4}    # and after the 4 fields class, mode, owner, group
-                           .*\b$pkginst\b # we find $pkginst among the list of owners
-                         }x
-              )
-            {
-
-                my $package_entry = Package::Entry->new_from_line( $line, 'contents' );
-                push( @pkgmap_entries, $package_entry );
-            }
-        }
-        close($fh);
-
-        return ( SUCCESS, \@pkgmap_entries );
     }
 
     #
@@ -1903,7 +1914,8 @@ sub removef_cmd {
 
     my $pkginst         = shift(@arguments);
     my @pathnames       = sort(@arguments);
-    my $package_entries = $package_manager->list_installed_files($pkginst);
+    my $package         = $package_manager->get_package($pkginst);
+    my $package_entries = $package->list_files();
 
     foreach my $pathname (@pathnames) {
         my $pkgmap_entry = first { $_->{filename} eq $pathname } @{$package_entries};

@@ -168,7 +168,7 @@ sub snapshot_playground {
             $fullname =~ s/^$path/$new_path/;
         }
 
-        # We register the list of files, the content of files (through a simple checksum)
+# We register the list of files, the content of files (through a simple checksum)
         $snapshot->{'file listing'}{$fullname} = 1;
         if ( -f "$realpath" ) {
             $snapshot->{'file content'}{$fullname} = cksum_file($realpath);
@@ -337,7 +337,8 @@ foreach my $scenario ( @{$test_scenarios} ) {
     my $native_results = play_scenario( $scenario, 'native', $playground_path, $packages_path );
 
     clean_playground( $playground_path, 'reset' );
-    my $svr4pkg_results = play_scenario( $scenario, 'svr4pkg', $playground_path, $packages_path );
+    my $svr4pkg_results =
+      play_scenario( $scenario, 'svr4pkg', $playground_path, $packages_path );
 
     is_deeply( $svr4pkg_results, $native_results, $scenario->{name} );
 }
