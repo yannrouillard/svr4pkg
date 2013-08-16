@@ -467,13 +467,7 @@ use 5.010001;
             package_entries => [],
             dependencies    => {},
             path_mappings   => {},
-            statistics      => {
-                directories       => 0,
-                executables       => 0,
-                pathnames         => 1,
-                information_files => 1,
-                blocks            => 0,
-            },
+            statistics      => undef,
         };
 
         # Handling optional arguments
@@ -486,8 +480,6 @@ use 5.010001;
 
         $self->_load_pkginfo();
         $self->_load_depend();
-
-        $self->_update_package_info();
         $self->_setup_base_environnement();
 
         return ($self);
@@ -506,6 +498,10 @@ use 5.010001;
 
         if ( $display_mode eq 'short' ) {
             return ( join( ' ', @{ $self->{pkginfo} }{@short_format_fields} ) );
+        }
+
+        if ( not defined( $self->{statistics} ) ) {
+            $self->_update_statistics();
         }
 
         my $info = '';
@@ -870,6 +866,10 @@ use 5.010001;
             my $pkgmap_entry = Package::Entry->new_from_line( $line, $format, $self->{pkginst} );
             push( @{ $self->{package_entries} }, $pkgmap_entry );
 
+            # We note what installation scripts are provided in the package
+            if ( $pkgmap_entry->is_installation_script() ) {
+                $self->{installation_scripts}{ $pkgmap_entry->{pathname} } = $pkgmap_entry;
+            }
         }
         close($fh);
     }
@@ -906,15 +906,18 @@ use 5.010001;
     #             This includes the list of installation scripts
     #             and the statistics about the files types and size.
     #
-    sub _update_package_info {
-        my $self = shift;
+    sub _update_statistics {
+        my ($self) = @_;
+
+        $self->{statistics} = {
+            directories       => 0,
+            executables       => 0,
+            pathnames         => 1,
+            information_files => 1,
+            blocks            => 0,
+        };
 
         foreach my $pkgmap_entry ( @{ $self->get_entries() } ) {
-
-            # We note what installation scripts are provided in the package
-            if ( $pkgmap_entry->is_installation_script() ) {
-                $self->{installation_scripts}{ $pkgmap_entry->{pathname} } = $pkgmap_entry;
-            }
 
             # We update some statistics about the package contents while
             # parsing the pkgmap file
