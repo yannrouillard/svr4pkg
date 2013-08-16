@@ -485,7 +485,6 @@ use 5.010001;
         bless( $self, $class );
 
         $self->_load_pkginfo();
-        $self->_load_pkgmap();
         $self->_load_depend();
 
         $self->_update_package_info();
@@ -596,7 +595,7 @@ use 5.010001;
         my ( $self, $dest ) = @_;
 
         my @pkgmap_entries =
-          grep { $_->is_information_file() and $_->{pathname} ne 'pkginfo' } @{ $self->{package_entries} };
+          grep { $_->is_information_file() and $_->{pathname} ne 'pkginfo' } @{ $self->get_entries() };
         $self->_install_files_by_copy( \@pkgmap_entries, catfile( $dest, 'install' ) );
         $self->put_parameter( 'INSTDATE', strftime( '%b %d %Y %H:%M', localtime() ) );
         $self->_dump_pkginfo( catfile( $dest, 'pkginfo' ) );
@@ -622,7 +621,7 @@ use 5.010001;
         foreach my $class (@classes) {
 
             my @pkgmap_entries =
-              grep { defined( $_->{class} ) and $_->{class} eq $class } @{ $self->{package_entries} };
+              grep { defined( $_->{class} ) and $_->{class} eq $class } @{ $self->get_entries() };
 
             my $action_script = $self->check_installation_script( "i.$class", $action_scripts_location );
             if ( defined($action_script) ) {
@@ -657,7 +656,7 @@ use 5.010001;
         foreach my $class (@classes) {
 
             my @pkgmap_entries =
-              grep { defined( $_->{class} ) and $_->{class} eq $class } @{ $self->{package_entries} };
+              grep { defined( $_->{class} ) and $_->{class} eq $class } @{ $self->get_entries() };
 
             # We want the list reverse sorted so that we first remove the deepest paths
             @pkgmap_entries = reverse( sort(@pkgmap_entries) );
@@ -684,7 +683,7 @@ use 5.010001;
         my ( $self, $dest ) = @_;
         my @inconsistent_files;
 
-        foreach my $pkgmap_entry ( @{ $self->{package_entries} } ) {
+        foreach my $pkgmap_entry ( @{ $self->get_entries() } ) {
             my $filename = $self->_build_path( $pkgmap_entry, $dest );
             my $non_compliant_fields = $pkgmap_entry->check_file_properties($filename);
 
@@ -755,9 +754,15 @@ use 5.010001;
     #
     # Purpose:    Returns the list of files owned by a package
     #             as a list of package::entry objects.
+    #             This function will
     #
-    sub list_files {
+    sub get_entries {
         my ($self) = @_;
+
+        if ( not( @{ $self->{package_entries} } ) ) {
+            $self->_load_pkgmap();
+        }
+
         return ( $self->{package_entries} );
     }
 
@@ -904,7 +909,7 @@ use 5.010001;
     sub _update_package_info {
         my $self = shift;
 
-        foreach my $pkgmap_entry ( @{ $self->{package_entries} } ) {
+        foreach my $pkgmap_entry ( @{ $self->get_entries() } ) {
 
             # We note what installation scripts are provided in the package
             if ( $pkgmap_entry->is_installation_script() ) {
@@ -1522,7 +1527,7 @@ use 5.010001;
         # update /var/sadm/install/contents
         make_path( dirname( $self->{content_file} ) );
 
-        my $pkgmap = $package->{package_entries};
+        my $pkgmap = $package->get_entries();
         my $index  = 0;
         foreach my $pkgmap_entry ( sort( @{$pkgmap} ) ) {
 
@@ -1544,7 +1549,7 @@ use 5.010001;
     sub _unregister_package {
         my ( $self, $package ) = @_;
 
-        my $pkgmap = $package->{package_entries};
+        my $pkgmap = $package->get_entries();
         my $index  = 0;
         foreach my $pkgmap_entry ( sort( @{$pkgmap} ) ) {
             next if ( $pkgmap_entry->is_information_file() );
@@ -1577,7 +1582,7 @@ use 5.010001;
         my $idx = 0;
         my $filename_at_idx;
         tie( my @contents, 'Tie::File', $self->{content_file} );
-        foreach my $pkgmap_entry ( sort ( @{ $package->{package_entries} } ) ) {
+        foreach my $pkgmap_entry ( sort ( @{ $package->get_entries() } ) ) {
 
             ( $idx, $filename_at_idx ) = $self->_find_insert_position( \@contents, $pkgmap_entry, $idx );
 
@@ -1895,7 +1900,7 @@ sub removef_cmd {
     my $pkginst         = shift(@arguments);
     my @pathnames       = sort(@arguments);
     my $package         = $package_manager->get_package($pkginst);
-    my $package_entries = $package->list_files();
+    my $package_entries = $package->get_entries();
 
     foreach my $pathname (@pathnames) {
         my $pkgmap_entry = first { $_->{filename} eq $pathname } @{$package_entries};
