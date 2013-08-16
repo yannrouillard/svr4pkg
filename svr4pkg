@@ -1167,12 +1167,15 @@ use 5.010001;
             $device = $self->{pkg_directory};
         }
 
-        if ( -f $device ) {
+        if ( -f $device or $device =~ m{^https?://} ) {
 
             # The package is in the datastream format
             # we must first convert it to filesystem format
-            $self->extract_package("$device");
-            $device = $self->{spool_directory};
+            my ( $ret, $info ) = $self->extract_package("$device");
+            return if ( $ret != SUCCESS );
+
+            $pkginst = $info;
+            $device  = $self->{spool_directory};
         }
 
         if ( $device eq $self->{pkg_directory} ) {
@@ -1182,6 +1185,8 @@ use 5.010001;
             # the /var/sadm/install/contents file
             $options->{package_entries} = $self->list_installed_files($pkginst);
         }
+
+        return if ( not defined($pkginst) );
 
         my $package = Package->new( $device, $pkginst, $options );
 
@@ -1206,6 +1211,12 @@ use 5.010001;
     #
     sub extract_package {
         my ( $self, $package_file ) = @_;
+
+        if ( $package_file =~ m{^https?://} ) {
+            my $url = $package_file;
+            $package_file = File::Temp->new( UNLINK => 1 );
+            system("wget --quiet '$url' -O '$package_file'");
+        }
 
         my $command = "pkgtrans -o $package_file " . $self->{spool_directory} . ' all';
         my $result  = `$command 2>&1`;
@@ -1705,10 +1716,15 @@ sub add_cmd {
 
     my ( $package_manager, $options, @arguments ) = @_;
 
-    return if ( not @arguments );
+    my $pkginst = @arguments ? shift(@arguments) : undef;
 
-    my $pkginst = shift(@arguments);
     my $package = $package_manager->get_package( $pkginst, $options->{device} );
+
+    if ( not defined $package ) {
+        print STDERR ("ERROR: no package name given or no package found in $options->{device}\n");
+        return;
+    }
+
     my ( $ret, $info ) = $package_manager->install_package($package);
 
     if ( $ret == Package::Manager::DEPENDENCY_ERROR ) {
