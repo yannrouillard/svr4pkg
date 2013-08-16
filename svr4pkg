@@ -718,9 +718,9 @@ use 5.010001;
     sub execute_procedure_script {
         my ( $self, $script ) = @_;
 
-        return if not exists( $self->{package_scripts}{$script} );
+        return if not exists( $self->{installation_scripts}{$script} );
 
-        my $pkgmap_entry = $self->{package_scripts}{$script};
+        my $pkgmap_entry = $self->{installation_scripts}{$script};
         my $script_path  = $self->_build_path($pkgmap_entry);
 
         $script_path = $self->_relocate_path_in_script($script_path);
