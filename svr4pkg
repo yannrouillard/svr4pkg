@@ -1225,6 +1225,7 @@ use 5.010001;
             system("wget --quiet '$url' -O '$package_file'");
         }
 
+        make_path( $self->{spool_directory} );
         my $command = "pkgtrans -o $package_file " . $self->{spool_directory} . ' all';
         my $result  = `$command 2>&1`;
 
