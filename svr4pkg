@@ -1932,7 +1932,7 @@ sub chk_cmd {
 ## installf command ######################################################
 
 $available_commands{installf} = \&installf_cmd;
-$commands_options_specs{installf} = { 'class' => { 'spec' => 'c', 'default' => 'none' }, };
+$commands_options_specs{installf} = { 'class' => { 'spec' => 'c=s', 'default' => 'none' }, };
 
 use constant MIN_FIELDS_COUNT => 3;
 use constant MAX_FIELDS_COUNT => 8;
@@ -1944,7 +1944,7 @@ sub installf_cmd {
     return if ( @arguments < MIN_FIELDS_COUNT );
 
     my ( $pkginst, $pathname, $ftype ) = @arguments[ 0 .. MIN_FIELDS_COUNT - 1 ];
-    my %fields = { 'class' => $options->{class} };
+    my %fields = ( 'class' => $options->{class} );
 
     if ( @arguments >= MAX_FIELDS_COUNT ) {
         $fields{ 'major', 'minor', 'mode', 'owner', 'group' } = @arguments[ MIN_FIELDS_COUNT .. MAX_FIELDS_COUNT - 1 ];
