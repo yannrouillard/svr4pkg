@@ -137,9 +137,9 @@ use 5.010001;
                 $self->{$field} = $values->{$field};
             }
         }
-        push( @{ $self->{packages} }, @pkginsts );
-
         bless( $self, $class );
+
+        $self->add_owners(@pkginsts);
 
         if ( $self->is_symlink() or $self->is_hardlink() ) {
             ( $self->{filename}, $self->{targetname} ) = split( /=/, $self->{pathname}, 2 );
@@ -485,11 +485,7 @@ use 5.010001;
         bless( $self, $class );
 
         $self->_load_pkginfo();
-        if ( basename( $self->{pkgmap_file} ) eq 'pkgmap' ) {
-            $self->_load_pkgmap();
-        } else {
-            $self->_load_contents();
-        }
+        $self->_load_pkgmap();
         $self->_load_depend();
 
         $self->_update_package_info();
@@ -833,60 +829,44 @@ use 5.010001;
     #
     # Purpose:    Parse the pkgmap file located in the package and
     #             initialize the list of package entries.
+    #             This function can also parse the /var/sadm/install/contents
+    #             file for a locally installed package and it will only
+    #             pick the entry relevant to this package.
     #
     sub _load_pkgmap {
         my ($self) = @_;
         my $pkgmap_file = $self->{pkgmap_file};
         return if not( -r $pkgmap_file );
 
+        my $pkginst = $self->{pkginst};
+        my $format = basename($pkgmap_file) eq 'pkgmap' ? 'pkgmap' : 'contents';
+
         open( my $fh, '<', $pkgmap_file ) or croak("ERROR: can't open $pkgmap_file");
         while ( my $line = <$fh> ) {
-            next if ( $line =~ /^:/ );
+            next if ( $line =~ /^[:#]/ );
             chomp($line);
 
-            my $pkgmap_entry = Package::Entry->new_from_line( $line, 'pkgmap', $self->{pkginst} );
+            if ( $format eq 'contents' ) {
+
+                # The /var/sadm/install/contents file contains entries for all
+                # packages installed on the system, so we use a pragmatic check
+                # if the line describes a file that belongs to our package
+                next if not(
+                    $line =~ m{               # either
+                            \s$pkginst\s*$    # the last field is $pkginst
+                            |                 # or
+                            \S+\sd\s          # this is directory owned by several packages
+                              (?:\S+\s){4}    # and after the 4 fields class, mode, owner, group
+                               .*\b$pkginst\b # we find $pkginst among the list of owners
+                             }x
+                );
+            }
+
+            my $pkgmap_entry = Package::Entry->new_from_line( $line, $format, $self->{pkginst} );
             push( @{ $self->{package_entries} }, $pkgmap_entry );
 
         }
         close($fh);
-    }
-
-    #
-    # Purpose:    Returns the list of files owned by a package
-    #             as a list of package::entry objects.
-    #
-    # Parameters:
-    #   $pkginst - the svr4 name of an installed package
-    #
-    sub _load_contents {
-        my ($self) = @_;
-        my @pkgmap_entries;
-        my $pkginst = $self->{pkginst};
-
-        open( my $fh, '<', $self->{pkgmap_file} ) or croak( 'ERROR: Can\'t open ' . $self->{pkgmap_file} );
-        while ( my $line = <$fh> ) {
-            chomp($line);
-            next if ( $line =~ /^#/ );
-
-            # We use a pragmatic test to check if the line describes a file
-            # that belongs to $pkginst, e.g. either:
-            if (
-                $line =~ m{               # either
-                        \s$pkginst\s*$    # the last field is $pkginst
-                        |                 # or
-                        \S+\sd\s          # this is directory owned by several packages
-                          (?:\S+\s){4}    # and after the 4 fields class, mode, owner, group
-                           .*\b$pkginst\b # we find $pkginst among the list of owners
-                         }x
-              )
-            {
-
-                my $package_entry = Package::Entry->new_from_line( $line, 'contents' );
-                push( @{ $self->{package_entries} }, $package_entry );
-            }
-        }
-        close($fh);
-
     }
 
     #
