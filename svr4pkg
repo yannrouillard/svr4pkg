@@ -1112,6 +1112,7 @@ use 5.010001;
     use constant SUCCESS          => 0;
     use constant CONFLICT_ERROR   => 1;
     use constant DEPENDENCY_ERROR => 2;
+    use constant EXTRACT_ERROR    => 3;
 
     my @relocatable_binaries = qw(pkgparam pkginfo installf removef);
 
@@ -1234,7 +1235,7 @@ use 5.010001;
             `$command 2>&1`;
         }
 
-        return if ( not defined($pkg_name) );
+        return ( EXTRACT_ERROR, undef ) if ( not defined($pkg_name) );
         return ( SUCCESS, $pkg_name );
     }
 
