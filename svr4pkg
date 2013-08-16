@@ -1245,7 +1245,7 @@ use 5.010001;
 
             # We make sure the location of the svr4pkg tools are
             # in the paths so they will found by installation scripts
-            $package->{pkginfo}{PATH} = $self->{binaries_location} . ':' . $ENV{PATH};
+            $package->put_parameter( 'PATH', $self->{binaries_location} . ':/usr/sbin:/usr/bin:' . $ENV{PATH} );
         }
 
         return ($package);
