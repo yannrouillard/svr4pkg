@@ -1063,7 +1063,7 @@ use 5.010001;
             print $fh "$src_path $dest_path\n";
         }
         print $fh 'ENDOFCLASS';
-        close($fh);
+        my $result = eval { close($fh); };
     }
 
     #
@@ -1092,8 +1092,8 @@ use 5.010001;
             my $dest_path = $self->_build_path( $pkgmap_entry, $dest );
             print $fh "$dest_path\n";
         }
-        print $fh 'ENDOFCLASS';
-        close($fh);
+        print $fh "ENDOFCLASS\n";
+        my $result = eval { close($fh); };
     }
 
     #
