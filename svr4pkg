@@ -1171,6 +1171,7 @@ use 5.010001;
         $self->{pkg_directory} = catfile( $self->{root_path}, $self->{admin_directory}, 'pkg' );
         $self->{content_file}  = catfile( $self->{root_path}, $self->{admin_directory}, 'install/contents' );
         $self->{path_mappings} = {};
+        $self->{contents}      = undef;
 
         # We will make sure any class actions scripts installed by a package
         # is relocated to a different location. This is required to install
@@ -1305,44 +1306,64 @@ use 5.010001;
     #
     # Parameters:
     #   $pkgmap_entry - the pkgmap entry that must be registered
-    #   $start        - an optional index in the contents array.
+    #   $idx          - an optional index in the contents array.
     #                   The method will look where to add the
     #                   new entry after this location.
     #
     sub register_file {
-        my ( $self, $pkgmap_entry, $start ) = @_;
-        if ( not defined($start) ) {
-            $start = 0;
+        my ( $self, $pkgmap_entry, $idx ) = @_;
+        if ( not defined($idx) ) {
+            $idx = 0;
         }
 
-        tie( my @contents, 'Tie::File', $self->{content_file} );
-
-        # /var/sadm/install/contents is plain text file which contains a sorted
-        # list of files installed by package, so we must first find the
-        # location where we must insert a new line for our file.
-        my ( $idx, $filename_at_idx ) = $self->_find_insert_position( \@contents, $pkgmap_entry, $start );
-
-        if ( $filename_at_idx eq $pkgmap_entry->{filename} ) {
-
-            # If the filename is the same, we will overwrite the current entry
-
-            # Directories are a special case, they are allowed
-            # to be owned by more than one package
-            if ( $pkgmap_entry->is_directory() ) {
-                my $old_pkgmap_entry = Package::Entry->new_from_line( $contents[$idx], 'contents' );
-                $pkgmap_entry->add_owners( @{ $old_pkgmap_entry->{packages} } );
+        if ( not( defined( $self->{contents} ) ) ) {
+            if ( -r $self->{content_file} ) {
+                open( my $fh, '<', $self->{content_file} ) or croak( 'ERROR: can\'t open ' . $self->{content_file} );
+                @{ $self->{contents} } = <$fh>;
+                chomp( @{ $self->{contents} } );
+                close($fh);
+            } else {
+                $self->{contents} = [];
             }
+        }
+
+        if ( not defined($pkgmap_entry) ) {
+            my $temp_content_file = File::Temp->new();
+            open( my $fh, '>', $temp_content_file ) or croak("ERROR: can't open $temp_content_file");
+            print $fh join( "\n", @{ $self->{contents} } );
+            close($fh);
+            rename( $temp_content_file, $self->{content_file} );
+            $self->{contents} = undef;
 
         } else {
 
-            #  we shift the array by one to make room for our new file
-            if ( $idx <= $#contents ) {
-                splice( @contents, $idx, 1, ( '', $contents[$idx] ) );
-            }
-        }
+            # /var/sadm/install/contents is plain text file which contains a sorted
+            # list of files installed by package, so we must first find the
+            # location where we must insert a new line for our file.
+            my $filename_at_idx;
+            ( $idx, $filename_at_idx ) = $self->_find_insert_position( $self->{contents}, $pkgmap_entry, $idx );
 
-        $contents[$idx] = $pkgmap_entry->as_contents_line();
-        untie(@contents);
+            if ( $filename_at_idx eq $pkgmap_entry->{filename} ) {
+
+                # If the filename is the same, we will overwrite the current entry
+
+                # Directories are a special case, they are allowed
+                # to be owned by more than one package
+                if ( $pkgmap_entry->is_directory() ) {
+                    my $old_pkgmap_entry = Package::Entry->new_from_line( $self->{contents}[$idx], 'contents' );
+                    $pkgmap_entry->add_owners( @{ $old_pkgmap_entry->{packages} } );
+                }
+
+            } else {
+
+                #  we shift the array by one to make room for our new file
+                if ( $idx <= $#{ $self->{contents} } ) {
+                    splice( @{ $self->{contents} }, $idx, 1, ( '', $self->{contents}[$idx] ) );
+                }
+            }
+
+            $self->{contents}[$idx] = $pkgmap_entry->as_contents_line();
+        }
 
         return ( SUCCESS, $idx );
 
@@ -1354,43 +1375,63 @@ use 5.010001;
     #
     # Parameters:
     #   $pkgmap_entry - the pkgmap entry that must be registered
-    #   $start        - an optional index in the contents array.
+    #   $idx          - an optional index in the contents array.
     #                   The method will look where to add the
     #                   new entry after this location.
     #
     sub unregister_file {
-        my ( $self, $pkgmap_entry, $start ) = @_;
-        if ( not defined($start) ) {
-            $start = 0;
+        my ( $self, $pkgmap_entry, $idx ) = @_;
+        if ( not defined($idx) ) {
+            $idx = 0;
         }
         my $do_delete = 1;
 
-        tie( my @contents, 'Tie::File', $self->{content_file} );
-
-        # /var/sadm/install/contents is plain text file which contains a sorted
-        # list of files installed by package, so we must first find the
-        # location where we must insert a new line for our file.
-        my ( $idx, $filename_at_idx ) = $self->_find_insert_position( \@contents, $pkgmap_entry, $start );
-
-        next if ( $filename_at_idx ne $pkgmap_entry->{filename} );
-
-        # Directories are a special case, they are allowed to be owned by
-        # more than one package, so we just remove the pkginsts
-        if ( $pkgmap_entry->is_directory() ) {
-            my $new_pkgmap_entry = Package::Entry->new_from_line( $contents[$idx], 'contents' );
-            $new_pkgmap_entry->remove_owners( @{ $pkgmap_entry->{packages} } );
-            if ( @{ $new_pkgmap_entry->{packages} } ) {
-                $contents[$idx] = $new_pkgmap_entry->as_contents_line();
-                $do_delete = 0;
+        if ( not( defined( $self->{contents} ) ) ) {
+            if ( -r $self->{content_file} ) {
+                open( my $fh, '<', $self->{content_file} ) or croak( 'ERROR: can\'t open ' . $self->{content_file} );
+                @{ $self->{contents} } = <$fh>;
+                chomp( @{ $self->{contents} } );
+                close($fh);
+            } else {
+                $self->{contents} = [];
             }
         }
 
-        if ( $do_delete and $idx <= $#contents ) {
+        if ( not defined($pkgmap_entry) ) {
+            my $temp_content_file = File::Temp->new();
+            open( my $fh, '>', $temp_content_file ) or croak("ERROR: can't open $temp_content_file");
+            print $fh join( "\n", @{ $self->{contents} } );
+            close($fh);
+            rename( $temp_content_file, $self->{content_file} );
+            $self->{contents} = undef;
 
-            #  we remove the element from the contents file
-            splice( @contents, $idx, 1 );
+        } else {
+
+            # /var/sadm/install/contents is plain text file which contains a sorted
+            # list of files installed by package, so we must first find the
+            # location where we must insert a new line for our file.
+            my $filename_at_idx;
+            ( $idx, $filename_at_idx ) = $self->_find_insert_position( $self->{contents}, $pkgmap_entry, $idx );
+
+            next if ( $filename_at_idx ne $pkgmap_entry->{filename} );
+
+            # Directories are a special case, they are allowed to be owned by
+            # more than one package, so we just remove the pkginsts
+            if ( $pkgmap_entry->is_directory() ) {
+                my $new_pkgmap_entry = Package::Entry->new_from_line( $self->{contents}[$idx], 'contents' );
+                $new_pkgmap_entry->remove_owners( @{ $pkgmap_entry->{packages} } );
+                if ( @{ $new_pkgmap_entry->{packages} } ) {
+                    $self->{contents}[$idx] = $new_pkgmap_entry->as_contents_line();
+                    $do_delete = 0;
+                }
+            }
+
+            if ( $do_delete and $idx <= $#{ $self->{contents} } ) {
+
+                #  we remove the element from the contents file
+                splice( @{ $self->{contents} }, $idx, 1 );
+            }
         }
-        untie(@contents);
 
         return ( SUCCESS, $idx );
     }
@@ -1540,6 +1581,9 @@ use 5.010001;
             # so we do not need to start again from index 0
             $index = $self->register_file( $pkgmap_entry, $index );
         }
+
+        # One last call with no argument to commit the modification
+        $self->register_file();
     }
 
     #
@@ -1562,6 +1606,9 @@ use 5.010001;
             $index = $self->unregister_file( $pkgmap_entry, $index );
         }
 
+        # One last call with no argument to commit the modification
+        $self->unregister_file();
+
         # update /var/sadm/pkg
         # we just delete the package directory in /var/sadm/pkg
         my $package_directory = catfile( $self->{pkg_directory}, $package->{pkginst} );
@@ -1582,9 +1629,15 @@ use 5.010001;
         my ( $self, $package, $dest ) = @_;
         my @conflicts;
 
+        return ( \@conflicts ) if not( -r $self->{content_file} );
+
         my $idx = 0;
         my $filename_at_idx;
-        tie( my @contents, 'Tie::File', $self->{content_file} );
+
+        open( my $fh, '<', $self->{content_file} ) or croak( 'ERROR: can\'t open ' . $self->{content_file} );
+        my @contents = <$fh>;
+        close($fh);
+
         foreach my $pkgmap_entry ( sort ( @{ $package->get_entries() } ) ) {
 
             ( $idx, $filename_at_idx ) = $self->_find_insert_position( \@contents, $pkgmap_entry, $idx );
@@ -1601,7 +1654,6 @@ use 5.010001;
 
             push( @conflicts, $pkgmap_entry->{filename} );
         }
-        untie(@contents);
 
         return ( \@conflicts );
     }
@@ -1887,6 +1939,9 @@ sub installf_cmd {
 
     my $pkgmap_entry = Package::Entry->new_from_file( $pathname, \%fields, $pkginst );
     my ( $ret, $info ) = $package_manager->register_file($pkgmap_entry);
+
+    # One last call with no argument to commit the modification
+    ( $ret, $info ) = $package_manager->register_file();
 }
 
 ## removef_cmd command ######################################################
@@ -1910,6 +1965,9 @@ sub removef_cmd {
         next if ( not defined($pkgmap_entry) );
         my ( $ret, $info ) = $package_manager->unregister_file( $pkgmap_entry, $pkginst );
     }
+
+    # One last call with no argument to commit the modification
+    my ( $ret, $info ) = $package_manager->unregister_file();
 }
 
 ## usage command ######################################################
