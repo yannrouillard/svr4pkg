@@ -1362,7 +1362,16 @@ use 5.010001;
                 }
             }
 
-            $self->{contents}[$idx] = $pkgmap_entry->as_contents_line();
+            my $line = $pkgmap_entry->as_contents_line();
+
+            # TODO: This code could in theory change the wrong part of the line
+            # so it must be reworked
+            foreach my $path ( keys( %{ $self->{path_mappings} } ) ) {
+                my $new_path = $self->{path_mappings}{$path};
+                $line =~ s/^$path/$new_path/;
+            }
+
+            $self->{contents}[$idx] = $line;
         }
 
         return ( SUCCESS, $idx );

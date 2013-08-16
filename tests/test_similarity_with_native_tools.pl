@@ -80,6 +80,18 @@ sub read_into_array {
         my $exclude_re = join( '|', @{ $options->{exclude} } );
         @array = grep { $_ !~ $exclude_re } @array;
     }
+
+    if ( $options->{path_mappings} ) {
+        foreach my $line (@array) {
+
+            # We transform some path that are always different between native and svr4pkg
+            foreach my $path ( keys( %{ $options->{path_mappings} } ) ) {
+                my $new_path = $options->{path_mappings}->{$path};
+                $line =~ s/^$path/$new_path/;
+            }
+        }
+    }
+
     if ( $options->{sorted} ) {
         @array = sort(@array);
     }
@@ -147,7 +159,8 @@ sub snapshot_playground {
         # Some files are special and deserve a special treatment
         # (e.g. pkginfo, /var/sadm/install/contents...)
         if ( $fullname eq '/var/sadm/install/contents' ) {
-            $snapshot->{'contents file'} = read_into_array( $realpath, { exclude => [qr{^#}] } );
+            $snapshot->{'contents file'} =
+              read_into_array( $realpath, { exclude => [qr{^#}], path_mappings => \%path_mappings, sorted => 1 } );
             return;
         }
         if ( $fullname =~ qr{/var/sadm/pkg/([^/]+)/pkginfo}x ) {
