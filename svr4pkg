@@ -196,7 +196,10 @@ use 5.010001;
         my ( $class, $filename, $additional_values, @pkginst ) = @_;
         my $values = {};
 
-        my $stats = lstat($filename);
+        # We remove the target part for hard and symlink
+        my ($realname) = ( $filename =~ m/^([^=]+)/ );
+
+        my $stats = lstat($realname);
         $values->{part}     = 1;
         $values->{ftype}    = $pkgmap_ftype_for{ S_IFMT( $stats->mode() ) };
         $values->{pathname} = $filename;
