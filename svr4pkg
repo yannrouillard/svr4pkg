@@ -404,6 +404,268 @@ use 5.010001;
     }
 
     ########################################################################
+    # Purpose:    The Package::Entry::Database class is responsable for
+    #             accessing and updating the database containing the list
+    #             of files installed by package on the current system.
+    #             The database is in fact a simple plain file containing
+    #             a line for each file installed.
+    #             It is usually the /var/sadm/install/contents file
+    #
+    ########################################################################
+    package Package::Entry::Database;
+
+    use File::Basename qw(dirname);
+    use File::Path qw(make_path);
+    use List::Util qw(first);
+
+    #
+    # Purpose:    Creates and returns a package database object
+    #             whose content is initialized from the given
+    #             filename.
+    #
+    # Parameters:
+    #   $filename - path of the file containing the list of files
+    #               installed by packages on the system.
+    #               The file should have the same format as the
+    #               /var/sadm/install/contents file
+    #
+    sub new {
+        my ( $class, $filename ) = @_;
+        my $self = {
+            filename    => $filename,
+            raw_entries => undef,
+            index       => undef,
+        };
+
+        bless( $self, $class );
+        return ($self);
+    }
+
+    #
+    # Purpose:    Add an entry in the package entry database
+    #
+    # Parameters:
+    #   $pkgmap_entry - a valid package entry object
+    #
+    sub register_entry {
+        my ( $self, $pkgmap_entry ) = @_;
+        my $raw_entries = $self->_get_raw_entries();
+        my $index       = $self->_get_index();
+        my $filename    = $pkgmap_entry->{filename};
+        my $packages    = $pkgmap_entry->{packages};
+
+        if ( exists( $index->{by_filename}{$filename} ) ) {
+
+            # Directories are a special case, they are allowed
+            # to be owned by more than one package
+            if ( $pkgmap_entry->is_directory() and defined( ${ $index->{by_filename}{$filename} } ) ) {
+                my $old_pkgmap_entry =
+                  Package::Entry->new_from_line( ${ $index->{by_filename}{$filename} }, 'contents' );
+                if ( $old_pkgmap_entry->is_directory() ) {
+                    $pkgmap_entry->add_owners( @{ $old_pkgmap_entry->{packages} } );
+                }
+            }
+            ${ $index->{by_filename}{$filename} } = $pkgmap_entry->as_contents_line();
+
+        } else {
+            push( @{ $self->{raw_entries} }, $pkgmap_entry->as_contents_line() );
+            $index->{by_filename}{$filename} = \$self->{raw_entries}[ $#{ $self->{raw_entries} } ];
+        }
+
+        foreach my $pkginst ( @{$packages} ) {
+            push( @{ $index->{by_package}{$pkginst} }, $index->{by_filename}{$filename} );
+        }
+    }
+
+    #
+    # Purpose:    Remove an entry from the package entry database
+    #
+    # Parameters:
+    #   $pkgmap_entry - a valid package entry object
+    #
+    sub unregister_entry {
+        my ( $self, $pkgmap_entry ) = @_;
+
+        my $raw_entries = $self->_get_raw_entries();
+        my $index       = $self->_get_index();
+        my $filename    = $pkgmap_entry->{filename};
+
+        if ( exists( $index->{by_filename}{$filename} ) and defined( ${ $index->{by_filename}{$filename} } ) ) {
+
+            # Directories are a special case, they are allowed
+            # to be owned by more than one package
+            my $old_pkgmap_entry = Package::Entry->new_from_line( ${ $index->{by_filename}{$filename} }, 'contents' );
+            if ( $old_pkgmap_entry->is_directory() ) {
+                $pkgmap_entry->remove_owners( @{ $old_pkgmap_entry->{packages} } );
+                if ( @{ $pkgmap_entry->{packages} } ) {
+
+                    # There are still some remaining packages that own the directory
+                    # so we update it and don't delete it
+                    ${ $index->{by_filename}{$filename} } = $pkgmap_entry->as_contents_line();
+                    return;
+                }
+            }
+            ${ $index->{by_filename}{$filename} } = undef;
+        }
+    }
+
+    #
+    # Purpose:    Check if the given package entry already
+    #             exists in the package database.
+    #
+    # Parameters:
+    #   $pkgmap_entry - a valid package entry object
+    #   $same_owner   - if true, has_entry will return true
+    #                    only if an entry with the same owner is found
+    #                   if false, has_entry will return true
+    #                    if an entry exists but without the same owners
+    #                    as the given pkgmap_entry
+    #
+    sub has_entry {
+        my ( $self, $pkgmap_entry, $same_owner ) = @_;
+
+        my $raw_entries = $self->_get_raw_entries();
+        my $index       = $self->_get_index();
+        my $filename    = $pkgmap_entry->{filename};
+
+        # we check if the given path is already registered in the database,
+        if ( exists( $index->{by_filename}{$filename} ) and defined( ${ $index->{by_filename}{$filename} } ) ) {
+            my $candidate_entry = Package::Entry->new_from_line( ${ $index->{by_filename}{$filename} }, 'contents' );
+            foreach my $pkginst ( @{ $pkgmap_entry->{packages} } ) {
+                if ( not( first { $_ eq $pkginst } @{ $candidate_entry->{packages} } ) ) {
+                    return ( not $same_owner );
+                }
+            }
+            return ($same_owner);
+        }
+
+        return;
+    }
+
+    #
+    # Purpose:    Return the list of package entries installed
+    #             on the system and owned by the given pkginst
+    #
+    # Parameters:
+    #   $pkginst - the SVR4 package name
+    #
+    sub get_package_entries {
+        my ( $self, $pkginst ) = @_;
+        my @entries;
+
+        my $index = $self->_get_index();
+
+        if ( exists( $index->{by_package}{$pkginst} ) ) {
+            foreach my $line_ref ( @{ $index->{by_package}{$pkginst} } ) {
+                next if not defined( ${$line_ref} );
+                push( @entries, Package::Entry->new_from_line( ${$line_ref}, 'contents' ) );
+            }
+        }
+
+        return ( \@entries );
+    }
+
+    #
+    # Purpose:    Save the package database on the file system
+    #             This method is automatically called when the
+    #             object is destroyed.
+    #
+    sub commit {
+        my ($self) = @_;
+
+        return if ( not defined( $self->{raw_entries} ) );
+
+        make_path( dirname( $self->{filename} ) );
+
+        my $index = $self->_get_index();
+        my $temp_file = File::Temp->new( TEMPLATE => $self->{filename} . '_XXXX' );
+
+        open( my $fh, '>', $temp_file ) or croak("ERROR: can't open $temp_file");
+        foreach my $filename ( sort ( keys( %{ $index->{by_filename} } ) ) ) {
+            next if ( not defined( ${ $index->{by_filename}{$filename} } ) );
+            print $fh ${ $index->{by_filename}{$filename} } . "\n";
+        }
+        close($fh);
+
+        rename( $temp_file, $self->{filename} );
+
+        $self->{raw_entries} = undef;
+        $self->{index}       = undef;
+    }
+
+    #
+    # Purpose:    Destructor
+    #
+    sub DESTROY {
+        my ($self) = @_;
+        $self->commit();
+    }
+
+    ## Private methods
+
+    #
+    # Purpose:    Return the entries stored in the database file
+    #
+    sub _get_raw_entries {
+        my ($self) = @_;
+
+        # We lazily load the database file it if has not yet been opened
+        if ( not defined( $self->{raw_entries} ) ) {
+            $self->{raw_entries} = [];
+
+            if ( -r $self->{filename} ) {
+                open( my $fh, '<', $self->{filename} ) or croak( 'ERROR: can\'t open ' . $self->{filename} );
+                @{ $self->{raw_entries} } = <$fh>;
+                chomp( @{ $self->{raw_entries} } );
+                close($fh);
+            }
+        }
+
+        return ( $self->{raw_entries} );
+    }
+
+    #
+    # Purpose:    Return the index by package and filename
+    #
+    sub _get_index {
+        my ($self) = @_;
+
+        if ( not defined( $self->{index} ) ) {
+            $self->{index} = {
+                by_package  => {},
+                by_filename => {},
+            };
+
+            my $filename_re  = qr{[^=\s]+};    # the filename part (not including the target)
+            my $target_re    = qr{=\S+};       # the target of symbolic|hard link
+            my $any_field_re = qr{\s+\S+};     # any field
+            my $package_re   = qr{\S+\s*};
+
+            foreach my $line ( @{ $self->_get_raw_entries() } ) {
+                my ( $filename, $packages ) = (
+                    $line =~ qr{
+                                    ^($filename_re)(?:$target_re)?
+                                    (?:\sd(?:$any_field_re){4}     # The directory type has only four info fields but it 
+                                                                   #  can have several packages as owners
+                                     |(?:$any_field_re)+)          # For the other type, only the last field is the package
+                                                                   #  so we consume pretty much all the fselds except the last
+                                    \s+((?:$package_re)+)$         # The last field(s) are the packages owning the file
+                                }x
+                );
+
+                # We ignore invalid lines and also comment lines that begin with '#'
+                next if ( not $filename or not $packages );
+                $self->{index}{by_filename}{$filename} = \$line;
+                foreach my $pkginst ( split( /\s+/, $packages ) ) {
+                    push( @{ $self->{index}{by_package}{$pkginst} }, \$line );
+                }
+            }
+        }
+
+        return ( $self->{index} );
+    }
+
+    ########################################################################
     # Purpose:   The Package class is responsable for providing information
     #            about a package and methods to run basic package procedures
     #            (file installation, script execution...)
@@ -475,7 +737,7 @@ use 5.010001;
         };
 
         # Handling optional arguments
-        foreach my $option_name (qw(path_mappings pkgmap_file)) {
+        foreach my $option_name (qw(path_mappings package_entries)) {
             if ( exists( $options->{$option_name} ) ) {
                 $self->{$option_name} = $options->{$option_name};
             }
@@ -844,30 +1106,13 @@ use 5.010001;
         return if not( -r $pkgmap_file );
 
         my $pkginst = $self->{pkginst};
-        my $format = basename($pkgmap_file) eq 'pkgmap' ? 'pkgmap' : 'contents';
 
         open( my $fh, '<', $pkgmap_file ) or croak("ERROR: can't open $pkgmap_file");
         while ( my $line = <$fh> ) {
             next if ( $line =~ /^[:#]/ );
             chomp($line);
 
-            if ( $format eq 'contents' ) {
-
-                # The /var/sadm/install/contents file contains entries for all
-                # packages installed on the system, so we use a pragmatic check
-                # if the line describes a file that belongs to our package
-                next if not(
-                    $line =~ m{               # either
-                            \s$pkginst\s*$    # the last field is $pkginst
-                            |                 # or
-                            \S+\sd\s          # this is directory owned by several packages
-                              (?:\S+\s){4}    # and after the 4 fields class, mode, owner, group
-                               .*\b$pkginst\b # we find $pkginst among the list of owners
-                             }x
-                );
-            }
-
-            my $pkgmap_entry = Package::Entry->new_from_line( $line, $format, $self->{pkginst} );
+            my $pkgmap_entry = Package::Entry->new_from_line( $line, 'pkgmap', $self->{pkginst} );
             push( @{ $self->{package_entries} }, $pkgmap_entry );
 
             # We note what installation scripts are provided in the package
@@ -1176,7 +1421,7 @@ use 5.010001;
         $self->{pkg_directory} = catfile( $self->{root_path}, $self->{admin_directory}, 'pkg' );
         $self->{content_file}  = catfile( $self->{root_path}, $self->{admin_directory}, 'install/contents' );
         $self->{path_mappings} = {};
-        $self->{contents}      = undef;
+        $self->{package_entry_database} = Package::Entry::Database->new( $self->{content_file} );
 
         # We will make sure any class actions scripts installed by a package
         # is relocated to a different location. This is required to install
@@ -1230,10 +1475,12 @@ use 5.010001;
 
         if ( $device eq $self->{pkg_directory} ) {
 
+            return if ( not $self->is_package_installed($pkginst) );
+
             # The package is a local one, so it doesn't have a
             # pkgmap file and the file information are stored in
             # the /var/sadm/install/contents file
-            $options->{pkgmap_file} = $self->{content_file};
+            $options->{package_entries} = $self->{package_entry_database}->get_package_entries($pkginst);
         }
 
         return if ( not defined($pkginst) );
@@ -1306,148 +1553,30 @@ use 5.010001;
     }
 
     #
-    # Purpose:    Register the given file in the package content
+    # Purpose:    Register the given file in the package entry
     #             database (usually the /var/sadm/install/contents file)
     #
     # Parameters:
     #   $pkgmap_entry - the pkgmap entry that must be registered
-    #   $idx          - an optional index in the contents array.
-    #                   The method will look where to add the
-    #                   new entry after this location.
     #
-    sub register_file {
-        my ( $self, $pkgmap_entry, $idx ) = @_;
-        if ( not defined($idx) ) {
-            $idx = 0;
-        }
-
-        if ( not( defined( $self->{contents} ) ) ) {
-            if ( -r $self->{content_file} ) {
-                open( my $fh, '<', $self->{content_file} ) or croak( 'ERROR: can\'t open ' . $self->{content_file} );
-                @{ $self->{contents} } = <$fh>;
-                chomp( @{ $self->{contents} } );
-                close($fh);
-            } else {
-                $self->{contents} = [];
-            }
-        }
-
-        if ( not defined( $pkgmap_entry->{filename} ) ) {
-            my $temp_content_file = File::Temp->new( TEMPLATE => $self->{content_file} . '_XXXX' );
-            open( my $fh, '>', $temp_content_file ) or croak("ERROR: can't open $temp_content_file");
-            print $fh join( "\n", @{ $self->{contents} } );
-            close($fh);
-            rename( $temp_content_file, $self->{content_file} );
-            $self->{contents} = undef;
-
-        } else {
-
-            # /var/sadm/install/contents is plain text file which contains a sorted
-            # list of files installed by package, so we must first find the
-            # location where we must insert a new line for our file.
-            my $filename_at_idx;
-            ( $idx, $filename_at_idx ) = $self->_find_insert_position( $self->{contents}, $pkgmap_entry, $idx );
-
-            if ( $filename_at_idx eq $pkgmap_entry->{filename} ) {
-
-                # If the filename is the same, we will overwrite the current entry
-
-                # Directories are a special case, they are allowed
-                # to be owned by more than one package
-                if ( $pkgmap_entry->is_directory() ) {
-                    my $old_pkgmap_entry = Package::Entry->new_from_line( $self->{contents}[$idx], 'contents' );
-                    $pkgmap_entry->add_owners( @{ $old_pkgmap_entry->{packages} } );
-                }
-
-            } else {
-
-                #  we shift the array by one to make room for our new file
-                if ( $idx <= $#{ $self->{contents} } ) {
-                    splice( @{ $self->{contents} }, $idx, 1, ( '', $self->{contents}[$idx] ) );
-                }
-            }
-
-            my $line = $pkgmap_entry->as_contents_line();
-
-            # TODO: This code could in theory change the wrong part of the line
-            # so it must be reworked
-            foreach my $path ( keys( %{ $self->{path_mappings} } ) ) {
-                my $new_path = $self->{path_mappings}{$path};
-                $line =~ s/^$path/$new_path/;
-            }
-
-            $self->{contents}[$idx] = $line;
-        }
-
-        return ( SUCCESS, $idx );
+    sub register_entry {
+        my ( $self, $pkgmap_entry ) = @_;
+        $self->{package_entry_database}->register_entry($pkgmap_entry);
+        return ( SUCCESS, undef );
 
     }
 
     #
-    # Purpose:    Unregisters the given file from the package content
+    # Purpose:    Unregisters the given file from the package entry
     #             database (usually the /var/sadm/install/contents file)
     #
     # Parameters:
     #   $pkgmap_entry - the pkgmap entry that must be registered
-    #   $idx          - an optional index in the contents array.
-    #                   The method will look where to add the
-    #                   new entry after this location.
     #
-    sub unregister_file {
-        my ( $self, $pkgmap_entry, $idx ) = @_;
-        if ( not defined($idx) ) {
-            $idx = 0;
-        }
-        my $do_delete = 1;
-
-        if ( not( defined( $self->{contents} ) ) ) {
-            if ( -r $self->{content_file} ) {
-                open( my $fh, '<', $self->{content_file} ) or croak( 'ERROR: can\'t open ' . $self->{content_file} );
-                @{ $self->{contents} } = <$fh>;
-                chomp( @{ $self->{contents} } );
-                close($fh);
-            } else {
-                $self->{contents} = [];
-            }
-        }
-
-        if ( not defined( $pkgmap_entry->{filename} ) ) {
-            my $temp_content_file = File::Temp->new( TEMPLATE => $self->{content_file} . '_XXXX' );
-            open( my $fh, '>', $temp_content_file ) or croak("ERROR: can't open $temp_content_file");
-            print $fh join( "\n", @{ $self->{contents} } );
-            close($fh);
-            rename( $temp_content_file, $self->{content_file} );
-            $self->{contents} = undef;
-
-        } else {
-
-            # /var/sadm/install/contents is plain text file which contains a sorted
-            # list of files installed by package, so we must first find the
-            # location where we must insert a new line for our file.
-            my $filename_at_idx;
-            ( $idx, $filename_at_idx ) = $self->_find_insert_position( $self->{contents}, $pkgmap_entry, $idx );
-
-            next if ( $filename_at_idx ne $pkgmap_entry->{filename} );
-
-            # Directories are a special case, they are allowed to be owned by
-            # more than one package, so we just remove the pkginsts
-            if ( $pkgmap_entry->is_directory() ) {
-                my $new_pkgmap_entry = Package::Entry->new_from_line( $self->{contents}[$idx], 'contents' );
-                $new_pkgmap_entry->remove_owners( @{ $pkgmap_entry->{packages} } );
-                if ( @{ $new_pkgmap_entry->{packages} } ) {
-                    $self->{contents}[$idx] = $new_pkgmap_entry->as_contents_line();
-                    $do_delete = 0;
-                }
-            }
-
-            if ( $do_delete and $idx <= $#{ $self->{contents} } ) {
-
-                #  we remove the element from the contents file
-                splice( @{ $self->{contents} }, $idx, 1 );
-            }
-        }
-
-        return ( SUCCESS, $idx );
+    sub unregister_entry {
+        my ( $self, $pkgmap_entry ) = @_;
+        $self->{package_entry_database}->unregister_entry($pkgmap_entry);
+        return ( SUCCESS, undef );
     }
 
     #
@@ -1582,22 +1711,11 @@ use 5.010001;
         my $package_directory = catfile( $self->{pkg_directory}, $package->{pkginst} );
         $package->install_information_files($package_directory);
 
-        # update /var/sadm/install/contents
-        make_path( dirname( $self->{content_file} ) );
-
         my $pkgmap = $package->get_entries();
-        my $index  = 0;
-        foreach my $pkgmap_entry ( sort( @{$pkgmap} ) ) {
-
+        foreach my $pkgmap_entry ( @{$pkgmap} ) {
             next if ( $pkgmap_entry->is_information_file() );
-
-            # the contents files is sorted and so is our list of pkgmap_entry
-            # so we do not need to start again from index 0
-            $index = $self->register_file( $pkgmap_entry, $index );
+            $self->register_entry($pkgmap_entry);
         }
-
-        # One last call with no argument to commit the modification
-        $self->register_file();
     }
 
     #
@@ -1611,17 +1729,10 @@ use 5.010001;
         my ( $self, $package ) = @_;
 
         my $pkgmap = $package->get_entries();
-        my $index  = 0;
-        foreach my $pkgmap_entry ( sort( @{$pkgmap} ) ) {
+        foreach my $pkgmap_entry ( @{$pkgmap} ) {
             next if ( $pkgmap_entry->is_information_file() );
-
-            # the contents files is sorted and so is our list of pkgmap_entry
-            # so we do not need to start again from index 0
-            $index = $self->unregister_file( $pkgmap_entry, $index );
+            $self->unregister_entry($pkgmap_entry);
         }
-
-        # One last call with no argument to commit the modification
-        $self->unregister_file();
 
         # update /var/sadm/pkg
         # we just delete the package directory in /var/sadm/pkg
@@ -1643,62 +1754,17 @@ use 5.010001;
         my ( $self, $package, $dest ) = @_;
         my @conflicts;
 
-        return ( \@conflicts ) if not( -r $self->{content_file} );
+        foreach my $pkgmap_entry ( @{ $package->get_entries() } ) {
+            next if ( $self->{package_entry_database}->has_entry( $pkgmap_entry, 1 ) );
 
-        my $idx = 0;
-        my $filename_at_idx;
-
-        open( my $fh, '<', $self->{content_file} ) or croak( 'ERROR: can\'t open ' . $self->{content_file} );
-        my @contents = <$fh>;
-        close($fh);
-
-        foreach my $pkgmap_entry ( sort ( @{ $package->get_entries() } ) ) {
-
-            ( $idx, $filename_at_idx ) = $self->_find_insert_position( \@contents, $pkgmap_entry, $idx );
-
-            # we check if the given path is already registered in the database,
-            # or if the file is present on the filesystem
-            if ( $filename_at_idx eq $pkgmap_entry->{filename} ) {
-                my $contents_entry = Package::Entry->new_from_line( $contents[$idx], 'contents' );
-                next if ( first { $_ eq $package->{pkginst} } @{ $contents_entry->{packages} } );
-
-            } else {
-                next if ( not( -e $package->_build_path( $pkgmap_entry, $dest ) ) );
+            if ( $self->{package_entry_database}->has_entry( $pkgmap_entry, 0 )
+                or -e $package->_build_path( $pkgmap_entry, $dest ) )
+            {
+                push( @conflicts, $pkgmap_entry->{filename} );
             }
-
-            push( @conflicts, $pkgmap_entry->{filename} );
         }
 
         return ( \@conflicts );
-    }
-
-    #
-    # Purpose:    Find the location where the given pkgmap entry
-    #             must be added in the /var/sadm/install/contents
-    #             file using a binary search algorithms
-    #
-    sub _find_insert_position {
-        my ( $self, $contents, $pkgmap_entry, $start ) = @_;
-        my $end             = scalar( @{$contents} );
-        my $filename        = $pkgmap_entry->{filename};
-        my $idx             = 0;
-        my $filename_at_idx = '';
-
-        while ( $start != $end ) {
-            $idx = $start + int( ( $end - $start ) / 2 );
-            $filename_at_idx = ( split( /\s+|=/, $contents->[$idx], 2 ) )[0];
-
-            my $cmp = $filename cmp $filename_at_idx;
-
-            last if ( $cmp == 0 );
-            if ( $cmp > 0 ) {
-                $start = ++$idx;
-                return ( $idx, '' ) if ( $idx > $#{$contents} );
-            } else {
-                $end = $idx;
-            }
-        }
-        return ( $idx, $filename_at_idx );
     }
 
 }
@@ -1952,10 +2018,7 @@ sub installf_cmd {
     }
 
     my $pkgmap_entry = Package::Entry->new_from_file( $pathname, \%fields, $pkginst );
-    my ( $ret, $info ) = $package_manager->register_file($pkgmap_entry);
-
-    # One last call with no argument to commit the modification
-    ( $ret, $info ) = $package_manager->register_file();
+    my ( $ret, $info ) = $package_manager->register_entry($pkgmap_entry);
 }
 
 ## removef_cmd command ######################################################
@@ -1977,11 +2040,8 @@ sub removef_cmd {
     foreach my $pathname (@pathnames) {
         my $pkgmap_entry = first { $_->{filename} eq $pathname } @{$package_entries};
         next if ( not defined($pkgmap_entry) );
-        my ( $ret, $info ) = $package_manager->unregister_file( $pkgmap_entry, $pkginst );
+        my ( $ret, $info ) = $package_manager->unregister_entry( $pkgmap_entry, $pkginst );
     }
-
-    # One last call with no argument to commit the modification
-    my ( $ret, $info ) = $package_manager->unregister_file();
 }
 
 ## usage command ######################################################
