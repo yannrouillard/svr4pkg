@@ -740,7 +740,7 @@ use 5.010001;
         };
 
         # Handling optional arguments
-        foreach my $option_name (qw(path_mappings package_entries)) {
+        foreach my $option_name (qw(path_mappings package_entries trace)) {
             if ( exists( $options->{$option_name} ) ) {
                 $self->{$option_name} = $options->{$option_name};
             }
@@ -1457,12 +1457,14 @@ use 5.010001;
     #              is present
     #
     sub get_package {
-        my ( $self, $pkginst, $device ) = @_;
+        my ( $self, $pkginst, $options ) = @_;
         my $package_entries;
-        my $options = { path_mappings => $self->{path_mappings} };
+        my $package_options = { path_mappings => $self->{path_mappings} };
 
-        if ( not defined($device) ) {
-            $device = $self->{pkg_directory};
+        my $device = exists( $options->{device} ) ? $options->{device} : $self->{pkg_directory};
+
+        if ( exists( $options->{trace} ) ) {
+            $package_options->{trace} = $options->{trace};
         }
 
         if ( -f $device or $device =~ m{^https?://} ) {
@@ -1483,12 +1485,12 @@ use 5.010001;
             # The package is a local one, so it doesn't have a
             # pkgmap file and the file information are stored in
             # the /var/sadm/install/contents file
-            $options->{package_entries} = $self->{package_entry_database}->get_package_entries($pkginst);
+            $package_options->{package_entries} = $self->{package_entry_database}->get_package_entries($pkginst);
         }
 
         return if ( not defined($pkginst) );
 
-        my $package = Package->new( $device, $pkginst, $options );
+        my $package = Package->new( $device, $pkginst, $package_options );
 
         if ( defined( $self->{binaries_location} ) ) {
 
@@ -1836,8 +1838,10 @@ sub info_cmd {
         $package_names = $info;
     }
 
+    my $package_options = { 'device' => $options->{device} };
+
     foreach my $package_name ( @{$package_names} ) {
-        my $package = $package_manager->get_package( $package_name, $options->{device} );
+        my $package = $package_manager->get_package( $package_name, $package_options );
         if ( not defined($package) ) {
             print STDERR "ERROR: information for \"$package_name\" was not found\n";
         } else {
@@ -1860,7 +1864,8 @@ sub add_cmd {
 
     my $pkginst = @arguments ? shift(@arguments) : undef;
 
-    my $package = $package_manager->get_package( $pkginst, $options->{device} );
+    my $package_options = { 'device' => $options->{device}, trace => $options->{trace} };
+    my $package = $package_manager->get_package( $pkginst, $package_options );
 
     if ( not defined $package ) {
         print STDERR ("ERROR: no package name given or no package found in $options->{device}\n");
@@ -1904,9 +1909,11 @@ sub rm_cmd {
 
     return if ( not @arguments );
 
+    my $package_options = { trace => $options->{trace} };
+
     my @packages_list;
     foreach my $pkginst (@arguments) {
-        my $package = $package_manager->get_package($pkginst);
+        my $package = $package_manager->get_package( $pkginst, $package_options );
         if ( not defined($package) ) {
             print STDERR "ERROR: no package associated with <$pkginst>\n";
             exit(1);
@@ -1945,8 +1952,9 @@ sub param_cmd {
 
     return if ( not @arguments );
 
-    my $pkginst = shift(@arguments);
-    my $package = $package_manager->get_package( $pkginst, $options->{device} );
+    my $pkginst         = shift(@arguments);
+    my $package_options = { device => $options->{device} };
+    my $package         = $package_manager->get_package( $pkginst, $package_options );
     print join( "\n", map { $package->{pkginfo}->{$_} } @arguments ) . "\n";
 }
 
@@ -1978,8 +1986,10 @@ sub chk_cmd {
         $package_names = $info;
     }
 
+    my $package_options = { device => $options->{device} };
+
     foreach my $pkginst ( @{$package_names} ) {
-        my $package = $package_manager->get_package( $pkginst, $options->{device} );
+        my $package = $package_manager->get_package( $pkginst, $package_options );
 
         foreach my $entry_error ( @{ $package->check_installed_files( $options->{root_path} ) } ) {
             my $package_entry = $entry_error->{package_entry};
