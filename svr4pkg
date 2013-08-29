@@ -1854,8 +1854,10 @@ sub info_cmd {
 
 $available_commands{'pkgadd'}     = \&add_cmd;
 $commands_options_specs{'pkgadd'} = {
-    'device' => { 'spec' => 'd=s', 'default' => '/var/spool/pkg' },
-    'trace'  => { 'spec' => 'v',   'default' => 0 },
+    'adminfile'      => { 'spec' => 'a=s', 'default' => undef },
+    'device'         => { 'spec' => 'd=s', 'default' => '/var/spool/pkg' },
+    'trace'          => { 'spec' => 'v',   'default' => 0 },
+    'noninteractive' => { 'spec' => 'n',   'default' => 0 },
 };
 
 sub add_cmd {
@@ -1883,25 +1885,38 @@ sub add_cmd {
     }
 
     if ( $ret == Package::Manager::CONFLICT_ERROR ) {
-        print("The following files are already installed on the system:\n");
 
-        # In that case, $info is a reference to a list of conflicting files
-        print( join( "\n", map { "\t$_" } @{$info} ) . "\n\n" );
+        my $force;
 
-        if ( is_interactive() ) {
-            print 'Would you like to install the package anyway (y/n) ? ';
-            my $answer = <STDIN>;
-            if ( $answer =~ /^[Yy]$/ ) {
-                ( $ret, $info ) = $package_manager->install_package( $package, { force => 1 } );
+        if ( not $options->{noninteractive} ) {
+            print("The following files are already installed on the system:\n");
+
+            # In that case, $info is a reference to a list of conflicting files
+            print( join( "\n", map { "\t$_" } @{$info} ) . "\n\n" );
+
+            if ( is_interactive() ) {
+                print 'Would you like to install the package anyway (y/n) ? ';
+                my $answer = <STDIN>;
+                $force = ( $answer =~ /^[Yy]$/ );
             }
+        }
+
+        # We assume yes in non interactive mode to be usable by pkgutil
+        # until we add real support the admin file through the "-a admin"
+        if ( $force or $options->{noninteractive} ) {
+            ( $ret, $info ) = $package_manager->install_package( $package, { force => 1 } );
         }
     }
 }
 
 ## pkgrm command ######################################################
 
-$available_commands{'pkgrm'} = \&rm_cmd;
-$commands_options_specs{'pkgrm'} = { 'trace' => { 'spec' => 'v', 'default' => 0 }, };
+$available_commands{'pkgrm'}     = \&rm_cmd;
+$commands_options_specs{'pkgrm'} = {
+    'adminfile'      => { 'spec' => 'a=s', 'default' => undef },
+    'trace'          => { 'spec' => 'v',   'default' => 0 },
+    'noninteractive' => { 'spec' => 'n',   'default' => 0 },
+};
 
 sub rm_cmd {
 
@@ -1925,17 +1940,26 @@ sub rm_cmd {
         my ( $ret, $info ) = $package_manager->remove_package($package);
 
         if ( $ret == Package::Manager::DEPENDENCY_ERROR ) {
-            print( 'The following packages depend on ' . $package->{pkginst} . ":\n" );
 
-            # In that case, $info is a reference to a list of dependent packages
-            print( join( "\n", map { "\t$_" } @{$info} ) . "\n\n" );
+            my $force;
 
-            if ( is_interactive() ) {
-                print 'Would you like to remove the package anyway (y/n) ? ';
-                my $answer = <STDIN>;
-                if ( $answer =~ /^[Yy]$/ ) {
-                    ( $ret, $info ) = $package_manager->remove_package( $package, { force => 1 } );
+            if ( not $options->{noninteractive} ) {
+                print( 'The following packages depend on ' . $package->{pkginst} . ":\n" );
+
+                # In that case, $info is a reference to a list of dependent packages
+                print( join( "\n", map { "\t$_" } @{$info} ) . "\n\n" );
+
+                if ( is_interactive() ) {
+                    print 'Would you like to remove the package anyway (y/n) ? ';
+                    my $answer = <STDIN>;
+                    $force = ( $answer =~ /^[Yy]$/ );
                 }
+            }
+
+            # We assume yes in non interactive mode to be usable by pkgutil,
+            # until we add real support the admin file through the "-a admin"
+            if ( $force or $options->{noninteractive} ) {
+                ( $ret, $info ) = $package_manager->remove_package( $package, { force => 1 } );
             }
         }
     }
