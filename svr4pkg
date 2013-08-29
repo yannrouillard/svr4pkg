@@ -199,7 +199,7 @@ use 5.010001;
         # We remove the target part for hard and symlink
         my ($realname) = ( $filename =~ m/^([^=]+)/ );
 
-        my $stats = lstat($realname);
+        my $stats = lstat($realname) or croak("ERROR: Can't get the status info of file $realname !");
         $values->{part}     = 1;
         $values->{ftype}    = $pkgmap_ftype_for{ S_IFMT( $stats->mode() ) };
         $values->{pathname} = $filename;
@@ -343,16 +343,16 @@ use 5.010001;
         if ( defined( $self->{owner} ) and defined( $self->{group} ) ) {
             my $uid = getpwnam( $self->{owner} );
             my $gid = getgrnam( $self->{group} );
-            chown( $uid, $gid, $path );
+            chown( $uid, $gid, $path ) or croak("ERROR: can't set owner/group of file $path !");
         }
 
         if ( defined( $self->{mode} ) ) {
-            chmod( oct( $self->{mode} ), $path );
+            chmod( oct( $self->{mode} ), $path ) or croak("ERROR: can't set permissions of file $path !");
         }
 
         if ( defined( $self->{modtime} ) ) {
             my $modtime = $self->{modtime};
-            utime( $modtime, $modtime, $path );
+            utime( $modtime, $modtime, $path ) or croak("ERROR: can't set modification time of file $path !");
         }
     }
 
@@ -361,7 +361,8 @@ use 5.010001;
     #             path match the informations stored in the pkgmap
     #             entry line. That includes size, cksum, owner, group,
     #             permissions.
-    #             It returns a list of non compliant fields.
+    #             It returns a list of non compliant fields or undef
+    #             if the file doesn't exist or can't be read.
     #
     # Parameters:
     #   $path - the path of the file whose fields will be checked
@@ -369,6 +370,8 @@ use 5.010001;
     sub check_file_properties {
         my ( $self, $path ) = @_;
         my @non_compliant_fields;
+
+        return if ( !-r $path );
 
         my $pkgmap_entry = Package::Entry->new_from_file($path);
 
@@ -585,9 +588,9 @@ use 5.010001;
             next if ( not defined( ${ $index->{by_filename}{$filename} } ) );
             print $fh ${ $index->{by_filename}{$filename} } . "\n";
         }
-        close($fh);
+        close($fh) or croak("ERROR: an error occured while closing file $temp_file !");
 
-        rename( $temp_file, $self->{filename} );
+        rename( $temp_file, $self->{filename} ) or croak("ERROR: can't rename $temp_file to $self->{filename} !");
 
         $self->{raw_entries} = undef;
         $self->{index}       = undef;
@@ -617,7 +620,7 @@ use 5.010001;
                 open( my $fh, '<', $self->{filename} ) or croak( 'ERROR: can\'t open ' . $self->{filename} );
                 @{ $self->{raw_entries} } = <$fh>;
                 chomp( @{ $self->{raw_entries} } );
-                close($fh);
+                close($fh) or croak("ERROR: an error occured while closing file $self->{filename}");
             }
         }
 
@@ -949,7 +952,7 @@ use 5.010001;
             my $filename = $self->_build_path( $pkgmap_entry, $dest );
             my $non_compliant_fields = $pkgmap_entry->check_file_properties($filename);
 
-            if ( @{$non_compliant_fields} ) {
+            if ( not defined($non_compliant_fields) or @{$non_compliant_fields} ) {
                 push(
                     @inconsistent_files,
                     {
@@ -1066,13 +1069,13 @@ use 5.010001;
             $pkginfo_file = catfile( $self->{path}, $self->{pkginst}, 'pkginfo' );
         }
 
-        open( my $fh, '<', $pkginfo_file ) or return;
+        open( my $fh, '<', $pkginfo_file ) or croak("ERROR: can't open pkginfo file at $pkginfo_file !");
         while ( my $line = <$fh> ) {
             chomp($line);
             my ( $key, $value ) = split( /=/, $line, 2 );
             $self->{pkginfo}{$key} = $value;
         }
-        close($fh);
+        close($fh) or croak("ERROR: an error occured while closing file $pkginfo_file !");
     }
 
     #
@@ -1120,7 +1123,7 @@ use 5.010001;
                 $self->{installation_scripts}{ $pkgmap_entry->{pathname} } = $pkgmap_entry;
             }
         }
-        close($fh);
+        close($fh) or croak("ERROR: an error occured while closing file $pkgmap_file !");
     }
 
     #
@@ -1138,13 +1141,13 @@ use 5.010001;
         my $depend_file = catfile( $self->{path}, $self->{pkginst}, 'install/depend' );
 
         if ( -r $depend_file ) {
-            open( my $fh, '<', $depend_file ) or croak("ERROR: can't open $depend_file");
+            open( my $fh, '<', $depend_file ) or croak("ERROR: can't open $depend_file !");
             while ( my $line = <$fh> ) {
                 my ( $type, $pkginst, $name ) = ( $line =~ /([PIR]) (\S+) (.*)/ );
                 next if not( defined($type) );
                 push( @{ $self->{dependencies}{$type} }, $pkginst );
             }
-            close($fh);
+            close($fh) or croak("ERROR: an error occured while closing file $depend_file !");
         }
     }
 
@@ -1981,6 +1984,12 @@ sub chk_cmd {
         foreach my $entry_error ( @{ $package->check_installed_files( $options->{root_path} ) } ) {
             my $package_entry = $entry_error->{package_entry};
             printf STDERR ( "ERROR: %s\n", ( $package_entry->{filename} ) );
+
+            if ( not defined( $entry_error->{errors} ) ) {
+                print STDERR "    pathname does not exist\n";
+                next;
+            }
+
             foreach my $error ( @{ $entry_error->{errors} } ) {
                 my ( $field, $expected, $actual ) = @{$error}{ 'field', 'expected', 'actual' };
                 if ( $field eq 'modtime' ) {
@@ -2017,6 +2026,8 @@ sub installf_cmd {
         $fields{ 'mode', 'owner', 'group' } = @arguments[ MIN_FIELDS_COUNT .. $#arguments ];
     }
 
+    return if ( !-r $pathname );
+
     my $pkgmap_entry = Package::Entry->new_from_file( $pathname, \%fields, $pkginst );
     my ( $ret, $info ) = $package_manager->register_entry($pkgmap_entry);
 }
@@ -2038,6 +2049,9 @@ sub removef_cmd {
     my $package_entries = $package->get_entries();
 
     foreach my $pathname (@pathnames) {
+
+        return if ( !-r $pathname );
+
         my $pkgmap_entry = first { $_->{filename} eq $pathname } @{$package_entries};
         next if ( not defined($pkgmap_entry) );
         my ( $ret, $info ) = $package_manager->unregister_entry( $pkgmap_entry, $pkginst );
@@ -2099,7 +2113,9 @@ my $pkgmgr = Package::Manager->new( \%package_manager_config );
 
 #
 my $command_sub = $available_commands{$command};
-&{$command_sub}( $pkgmgr, \%options, @ARGV );
+my $ret = &{$command_sub}( $pkgmgr, \%options, @ARGV );
+
+exit($ret);
 
 __END__
 # POD start
