@@ -231,6 +231,9 @@ use 5.010001;
     sub is_information_file { my $self = shift; return ( $self->{ftype} eq 'i' ); }
     sub is_symlink          { my $self = shift; return ( $self->{ftype} eq 's' ); }
     sub is_hardlink         { my $self = shift; return ( $self->{ftype} eq 'l' ); }
+    sub is_pipe             { my $self = shift; return ( $self->{ftype} eq 'p' ); }
+    sub is_block_device     { my $self = shift; return ( $self->{ftype} eq 'b' ); }
+    sub is_character_device { my $self = shift; return ( $self->{ftype} eq 'c' ); }
     sub is_regular_file { my $self = shift; return ( $self->{ftype} =~ /[fve]/ ); }
     sub is_relative { my $self = shift; return ( not file_name_is_absolute( $self->{pathname} ) ); }
 
@@ -885,17 +888,32 @@ use 5.010001;
 
         foreach my $class (@classes) {
 
-            my @pkgmap_entries =
-              grep { defined( $_->{class} ) and $_->{class} eq $class } @{ $self->get_entries() };
+            # We install the files following the procedure described in "Script Processing
+            # During Package Installation" in the # "Application Packaging Developer's Guide"
+
+            my ( $special_entries, $regular_entries, $hardlink_entries ) = $self->_get_class_entries($class);
 
             my $action_script = $self->check_installation_script( "i.$class", $action_scripts_location );
+
+            # We first create symbolic links, devices, named pipes, and directories.
+            my $failed_entries = $self->_install_files_by_copy( $special_entries, $dest );
+
+            # Then we install the regular files using the class action script if it exists
             if ( defined($action_script) ) {
-                $self->_install_files_by_action_script( \@pkgmap_entries, $dest, $action_script );
+
+                # If any of the special entries could not be created, they will be feed to the class
+                # action scripts as explained in "How Classes Are Processed During Package Installation"
+                push( @{$regular_entries}, @{$failed_entries} );
+
+                $self->_install_files_by_action_script( $regular_entries, $dest, $action_script );
             } else {
-                $self->_install_files_by_copy( \@pkgmap_entries, $dest );
+                $self->_install_files_by_copy( $regular_entries, $dest );
             }
 
-            foreach my $pkgmap_entry (@pkgmap_entries) {
+            # Then we create the hardlinks
+            $self->_install_files_by_copy( $hardlink_entries, $dest );
+
+            foreach my $pkgmap_entry ( @{$special_entries}, @{$regular_entries}, @{$hardlink_entries} ) {
                 $pkgmap_entry->apply_pkgmap_properties( $self->_build_path( $pkgmap_entry, $dest ) );
             }
         }
@@ -920,18 +938,25 @@ use 5.010001;
 
         foreach my $class (@classes) {
 
-            my @pkgmap_entries =
-              grep { defined( $_->{class} ) and $_->{class} eq $class } @{ $self->get_entries() };
+            # We remove the files following the procedure described in "Script Processing
+            # During Package removal in the "Application Packaging Developer's Guide"
 
-            # We want the list reverse sorted so that we first remove the deepest paths
-            @pkgmap_entries = reverse( sort(@pkgmap_entries) );
+            my ( $special_entries, $regular_entries, $hardlink_entries ) = $self->_get_class_entries($class);
 
             my $action_script = $self->check_installation_script( "r.$class", $action_scripts_location );
+
+            # We first remove the hardlinks
+            $self->_remove_files_by_unlink( $hardlink_entries, $dest );
+
+            # Then we remove the regular files using the class action script if it exists
             if ( defined($action_script) ) {
-                $self->_remove_files_by_action_script( \@pkgmap_entries, $dest, $action_script );
+                $self->_remove_files_by_action_script( $regular_entries, $dest, $action_script );
             } else {
-                $self->_remove_files_by_unlink( \@pkgmap_entries, $dest );
+                $self->_remove_files_by_unlink( $regular_entries, $dest );
             }
+
+            # Last, we remove symbolic links, devices, named pipes, and directories.
+            $self->_remove_files_by_unlink( $special_entries, $dest );
         }
     }
 
@@ -1224,6 +1249,40 @@ use 5.010001;
     }
 
     #
+    # Purpose:    Given a class, this methods returns the list of
+    #             package entries belonging to this class, separated
+    #             in special entries, regular entries and hardlink entries
+    #
+    # Parameters:
+    #   $class - name of the class
+    #
+    sub _get_class_entries {
+        my ( $self, $class ) = @_;
+
+        my @special_entries;    # name pipe, symlink, block and character devices, directory
+        my @regular_entries;    # entries of type f, v or e
+        my @hardlink_entries;
+
+        foreach my $pkgmap_entry ( sort( @{ $self->get_entries() } ) ) {
+            next if ( not defined( $pkgmap_entry->{class} ) or $pkgmap_entry->{class} ne $class );
+
+            for ($pkgmap_entry) {
+                if ( $_->is_hardlink() ) {
+                    push( @hardlink_entries, $pkgmap_entry );
+
+                } elsif ( $_->is_regular_file() ) {
+                    push( @regular_entries, $pkgmap_entry );
+
+                } else {
+                    push( @special_entries, $pkgmap_entry );
+                }
+            }
+        }
+
+        return ( \@special_entries, \@regular_entries, \@hardlink_entries );
+    }
+
+    #
     # Purpose:       Install the files of the package on the target location
     #                using a standard copy/link/symlink operation, depending
     #                on the file type.
@@ -1235,6 +1294,7 @@ use 5.010001;
     sub _install_files_by_copy {
 
         my ( $self, $pkgmap_entries, $dest ) = @_;
+        my @failed_entries;
 
         # we make sure the files are first created with restrictive access
         my $original_umask = umask(RESTRICTED_MASK);
@@ -1243,20 +1303,28 @@ use 5.010001;
             my $dest_path = $self->_build_path( $pkgmap_entry, $dest );
             make_path( dirname($dest_path) );
 
+            my $success;
+
             for ($pkgmap_entry) {
-                if ( $_->is_symlink() ) { symlink( $pkgmap_entry->{targetname}, $dest_path ); }
-                if ( $_->is_hardlink() ) { link( $pkgmap_entry->{targetname}, $dest_path ); }
-                if ( $_->is_directory() ) { mkdir($dest_path); }
+                if ( $_->is_symlink() ) { $success = symlink( $pkgmap_entry->{targetname}, $dest_path ); }
+                if ( $_->is_hardlink() ) { $success = link( $pkgmap_entry->{targetname}, $dest_path ); }
+                if ( $_->is_directory() ) { $success = mkdir($dest_path); }
 
                 if ( $_->is_regular_file() or $_->is_information_file() ) {
                     my $src_path = $self->_build_path($pkgmap_entry);
-                    copy( $src_path, $dest_path );
+                    $success = copy( $src_path, $dest_path );
                 }
+            }
+
+            if ( not $success ) {
+                push( @failed_entries, $pkgmap_entry );
             }
         }
 
         # we restore the previous umask;
         umask($original_umask);
+
+        return ( \@failed_entries );
     }
 
     #
@@ -1271,7 +1339,7 @@ use 5.010001;
     sub _remove_files_by_unlink {
         my ( $self, $pkgmap_entries, $dest ) = @_;
 
-        foreach my $pkgmap_entry ( @{$pkgmap_entries} ) {
+        foreach my $pkgmap_entry ( reverse( @{$pkgmap_entries} ) ) {
             my $dest_path = $self->_build_path( $pkgmap_entry, $dest );
 
             if ( $pkgmap_entry->is_directory() ) {
@@ -1306,7 +1374,7 @@ use 5.010001;
 
             # An action class script takes as input of list of files
             # to install
-            my $src_path = $self->_build_path($pkgmap_entry);
+            my $src_path = $pkgmap_entry->is_regular_file() ? $self->_build_path($pkgmap_entry) : '/dev/null';
             my $dest_path = $self->_build_path( $pkgmap_entry, $dest );
             print $fh "$src_path $dest_path\n";
         }
@@ -1334,7 +1402,7 @@ use 5.010001;
         local @ENV{ keys( %{ $self->{pkginfo} } ) } = values( %{ $self->{pkginfo} } );
         open( my $fh, '|-', $command ) or croak("ERROR: can't run script $action_script !");
 
-        foreach my $pkgmap_entry ( @{$pkgmap_entries} ) {
+        foreach my $pkgmap_entry ( reverse( @{$pkgmap_entries} ) ) {
 
             # An action class script takes as input of list of files to remove
             my $dest_path = $self->_build_path( $pkgmap_entry, $dest );
