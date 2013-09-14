@@ -743,7 +743,7 @@ use 5.010001;
         };
 
         # Handling optional arguments
-        foreach my $option_name (qw(path_mappings package_entries trace)) {
+        foreach my $option_name (qw(path_mappings package_entries_callback trace)) {
             if ( exists( $options->{$option_name} ) ) {
                 $self->{$option_name} = $options->{$option_name};
             }
@@ -1044,13 +1044,19 @@ use 5.010001;
     #
     # Purpose:    Returns the list of files owned by a package
     #             as a list of package::entry objects.
-    #             This function will
     #
     sub get_entries {
         my ($self) = @_;
 
         if ( not( @{ $self->{package_entries} } ) ) {
-            $self->_load_pkgmap();
+
+            # If we were given a callback to find the package entries at
+            # creation time, it takes precedence over pkgmap
+            if ( $self->{package_entries_callback} ) {
+                $self->{package_entries} = &{ $self->{package_entries_callback} }();
+            } else {
+                $self->_load_pkgmap();
+            }
         }
 
         return ( $self->{package_entries} );
@@ -1552,8 +1558,10 @@ use 5.010001;
 
             # The package is a local one, so it doesn't have a
             # pkgmap file and the file information are stored in
-            # the /var/sadm/install/contents file
-            $package_options->{package_entries} = $self->{package_entry_database}->get_package_entries($pkginst);
+            # the /var/sadm/install/contents file, we just set the
+            # entries_callback
+            $package_options->{package_entries_callback} =
+              sub { return ( $self->{package_entry_database}->get_package_entries($pkginst) ); };
         }
 
         return if ( not defined($pkginst) );
