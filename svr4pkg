@@ -1372,6 +1372,7 @@ use 5.010001;
 
         $action_script = $self->_relocate_path_in_script($action_script);
         my $command = $self->{trace} ? "sh -x $action_script" : $action_script;
+        $command .= ' ENDOFCLASS';
 
         local @ENV{ keys( %{ $self->{pkginfo} } ) } = values( %{ $self->{pkginfo} } );
         open( my $fh, '|-', $command ) or croak("ERROR: can't run $action_script !");
@@ -1384,7 +1385,6 @@ use 5.010001;
             my $dest_path = $self->_build_path( $pkgmap_entry, $dest );
             print $fh "$src_path $dest_path\n";
         }
-        print $fh 'ENDOFCLASS';
         my $result = eval { close($fh); };
     }
 
@@ -1404,6 +1404,7 @@ use 5.010001;
 
         $action_script = $self->_relocate_path_in_script($action_script);
         my $command = $self->{trace} ? "sh -x $action_script" : $action_script;
+        $command .= ' ENDOFCLASS';
 
         local @ENV{ keys( %{ $self->{pkginfo} } ) } = values( %{ $self->{pkginfo} } );
         open( my $fh, '|-', $command ) or croak("ERROR: can't run script $action_script !");
@@ -1414,7 +1415,6 @@ use 5.010001;
             my $dest_path = $self->_build_path( $pkgmap_entry, $dest );
             print $fh "$dest_path\n";
         }
-        print $fh "ENDOFCLASS\n";
         my $result = eval { close($fh); };
     }
 
