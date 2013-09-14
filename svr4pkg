@@ -1173,10 +1173,10 @@ use 5.010001;
 
             # We update some statistics about the package contents while
             # parsing the pkgmap file
-            given ($pkgmap_entry) {
-                when ( $_->is_directory )        { $self->{statistics}{directories}       += 1 }
-                when ( $_->is_executable )       { $self->{statistics}{executables}       += 1 }
-                when ( $_->is_information_file ) { $self->{statistics}{information_files} += 1 }
+            for ($pkgmap_entry) {
+                if ( $_->is_directory() )        { $self->{statistics}{directories}       += 1 }
+                if ( $_->is_executable() )       { $self->{statistics}{executables}       += 1 }
+                if ( $_->is_information_file() ) { $self->{statistics}{information_files} += 1 }
             }
             $self->{statistics}{pathnames} += 1;
             $self->{statistics}{blocks} += $pkgmap_entry->get_block_size();
@@ -1243,12 +1243,12 @@ use 5.010001;
             my $dest_path = $self->_build_path( $pkgmap_entry, $dest );
             make_path( dirname($dest_path) );
 
-            given ($pkgmap_entry) {
-                when ( $_->is_symlink() ) { symlink( $pkgmap_entry->{targetname}, $dest_path ); }
-                when ( $_->is_hardlink() ) { link( $pkgmap_entry->{targetname}, $dest_path ); }
-                when ( $_->is_directory() ) { mkdir($dest_path); }
+            for ($pkgmap_entry) {
+                if ( $_->is_symlink() ) { symlink( $pkgmap_entry->{targetname}, $dest_path ); }
+                if ( $_->is_hardlink() ) { link( $pkgmap_entry->{targetname}, $dest_path ); }
+                if ( $_->is_directory() ) { mkdir($dest_path); }
 
-                when ( $_->is_regular_file() or $_->is_information_file() ) {
+                if ( $_->is_regular_file() or $_->is_information_file() ) {
                     my $src_path = $self->_build_path($pkgmap_entry);
                     copy( $src_path, $dest_path );
                 }
