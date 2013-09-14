@@ -1848,6 +1848,8 @@ sub info_cmd {
             print( $package->get_info( $options->{long_format} ? 'long' : 'short' ) . "\n" );
         }
     }
+
+    return (1);
 }
 
 ## pkgadd command ######################################################
@@ -1907,6 +1909,8 @@ sub add_cmd {
             ( $ret, $info ) = $package_manager->install_package( $package, { force => 1 } );
         }
     }
+
+    return ( $ret == Package::Manager::SUCCESS );
 }
 
 ## pkgrm command ######################################################
@@ -1962,7 +1966,12 @@ sub rm_cmd {
                 ( $ret, $info ) = $package_manager->remove_package( $package, { force => 1 } );
             }
         }
+        if ( $ret != Package::Manager::SUCCESS ) {
+            return;
+        }
     }
+
+    return (1);
 }
 
 ## pkgparam command ######################################################
@@ -1980,6 +1989,8 @@ sub param_cmd {
     my $package_options = { device => $options->{device} };
     my $package         = $package_manager->get_package( $pkginst, $package_options );
     print join( "\n", map { $package->{pkginfo}->{$_} } @arguments ) . "\n";
+
+    return (1);
 }
 
 ## pkgchk command ######################################################
@@ -2035,6 +2046,8 @@ sub chk_cmd {
             }
         }
     }
+
+    return (1);
 }
 
 ## installf command ######################################################
@@ -2089,7 +2102,13 @@ sub removef_cmd {
         my $pkgmap_entry = first { $_->{filename} eq $pathname } @{$package_entries};
         next if ( not defined($pkgmap_entry) );
         my ( $ret, $info ) = $package_manager->unregister_entry( $pkgmap_entry, $pkginst );
+
+        if ( $ret != Package::Manager::SUCCESS ) {
+            return;
+        }
     }
+
+    return (1);
 }
 
 ## usage command ######################################################
@@ -2149,7 +2168,7 @@ my $pkgmgr = Package::Manager->new( \%package_manager_config );
 my $command_sub = $available_commands{$command};
 my $ret = &{$command_sub}( $pkgmgr, \%options, @ARGV );
 
-exit($ret);
+exit( $ret ? 0 : 2 );
 
 __END__
 # POD start
