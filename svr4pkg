@@ -1310,12 +1310,12 @@ use 5.010001;
             my $dest_path = $self->_build_path( $pkgmap_entry, $dest );
             make_path( dirname($dest_path) );
 
-            my $success;
+            my $success = 1;
 
             for ($pkgmap_entry) {
                 if ( $_->is_symlink() ) { $success = symlink( $pkgmap_entry->{targetname}, $dest_path ); }
                 if ( $_->is_hardlink() ) { $success = link( $pkgmap_entry->{targetname}, $dest_path ); }
-                if ( $_->is_directory() ) { $success = mkdir($dest_path); }
+                if ( $_->is_directory() and ( !-d $dest_path ) ) { $success = mkdir($dest_path); }
 
                 if ( $_->is_regular_file() or $_->is_information_file() ) {
                     my $src_path = $self->_build_path($pkgmap_entry);
