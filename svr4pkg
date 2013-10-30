@@ -37,7 +37,7 @@ use 5.010001;
     package Package::Entry;
 
     use List::Util qw(first);
-    use File::Spec::Functions qw(file_name_is_absolute);
+    use File::Spec::Functions qw(file_name_is_absolute catfile);
     use File::stat;
     use Fcntl ':mode';
     use POSIX qw(ceil);
@@ -279,11 +279,10 @@ use 5.010001;
     # Purpose:    Returns the corresponding line to be added in the
     #             /var/sadm/install/contents file for this entry
     # Parameters:
-    #   @pkginsts - the list of SVR4 package names that own this entry
-    #               they will be listed at the end of the line.
+    #   $basedir - BASEDIR value for the corresponding package if it exists
     #
     sub as_contents_line {
-        my ($self) = @_;
+        my ( $self, $basedir ) = @_;
 
         # information files are not stored in the contents file
         return if ( $self->is_information_file() );
@@ -295,6 +294,12 @@ use 5.010001;
 
         my @values = map ( { $self->{$_} } @contents_line_fields );
         push( @values, @{ $self->{packages} } );
+
+        # If we were given a basedir, we will use to transform relative path into absolutes ones
+        # The first value is always the pathname so we directly change it
+        if ( defined($basedir) and $self->is_relative() ) {
+            $values[0] = catfile( $basedir, $values[0] );
+        }
 
         my $line = join( ' ', @values );
         return ($line);
@@ -424,6 +429,7 @@ use 5.010001;
     use File::Basename qw(dirname);
     use File::Path qw(make_path);
     use List::Util qw(first);
+    use File::Spec::Functions qw(catfile);
 
     #
     # Purpose:    Creates and returns a package database object
@@ -455,11 +461,15 @@ use 5.010001;
     #   $pkgmap_entry - a valid package entry object
     #
     sub register_entry {
-        my ( $self, $pkgmap_entry ) = @_;
+        my ( $self, $pkgmap_entry, $basedir ) = @_;
         my $raw_entries = $self->_get_raw_entries();
         my $index       = $self->_get_index();
         my $filename    = $pkgmap_entry->{filename};
         my $packages    = $pkgmap_entry->{packages};
+
+        if ( defined($basedir) and $pkgmap_entry->is_relative() ) {
+            $filename = catfile( $basedir, $filename );
+        }
 
         if ( exists( $index->{by_filename}{$filename} ) ) {
 
@@ -472,10 +482,10 @@ use 5.010001;
                     $pkgmap_entry->add_owners( @{ $old_pkgmap_entry->{packages} } );
                 }
             }
-            ${ $index->{by_filename}{$filename} } = $pkgmap_entry->as_contents_line();
+            ${ $index->{by_filename}{$filename} } = $pkgmap_entry->as_contents_line($basedir);
 
         } else {
-            push( @{ $self->{raw_entries} }, $pkgmap_entry->as_contents_line() );
+            push( @{ $self->{raw_entries} }, $pkgmap_entry->as_contents_line($basedir) );
             $index->{by_filename}{$filename} = \$self->{raw_entries}[ $#{ $self->{raw_entries} } ];
         }
 
@@ -491,11 +501,15 @@ use 5.010001;
     #   $pkgmap_entry - a valid package entry object
     #
     sub unregister_entry {
-        my ( $self, $pkgmap_entry ) = @_;
+        my ( $self, $pkgmap_entry, $basedir ) = @_;
 
         my $raw_entries = $self->_get_raw_entries();
         my $index       = $self->_get_index();
         my $filename    = $pkgmap_entry->{filename};
+
+        if ( defined($basedir) and $pkgmap_entry->is_relative() ) {
+            $filename = catfile( $basedir, $filename );
+        }
 
         if ( exists( $index->{by_filename}{$filename} ) and defined( ${ $index->{by_filename}{$filename} } ) ) {
 
@@ -508,7 +522,7 @@ use 5.010001;
 
                     # There are still some remaining packages that own the directory
                     # so we update it and don't delete it
-                    ${ $index->{by_filename}{$filename} } = $pkgmap_entry->as_contents_line();
+                    ${ $index->{by_filename}{$filename} } = $pkgmap_entry->as_contents_line($basedir);
                     return;
                 }
             }
@@ -1642,8 +1656,8 @@ use 5.010001;
     #   $pkgmap_entry - the pkgmap entry that must be registered
     #
     sub register_entry {
-        my ( $self, $pkgmap_entry ) = @_;
-        $self->{package_entry_database}->register_entry($pkgmap_entry);
+        my ( $self, $pkgmap_entry, $basedir ) = @_;
+        $self->{package_entry_database}->register_entry( $pkgmap_entry, $basedir );
         return ( SUCCESS, undef );
 
     }
@@ -1656,8 +1670,8 @@ use 5.010001;
     #   $pkgmap_entry - the pkgmap entry that must be registered
     #
     sub unregister_entry {
-        my ( $self, $pkgmap_entry ) = @_;
-        $self->{package_entry_database}->unregister_entry($pkgmap_entry);
+        my ( $self, $pkgmap_entry, $basedir ) = @_;
+        $self->{package_entry_database}->unregister_entry( $pkgmap_entry, $basedir );
         return ( SUCCESS, undef );
     }
 
@@ -1793,10 +1807,11 @@ use 5.010001;
         my $package_directory = catfile( $self->{pkg_directory}, $package->{pkginst} );
         $package->install_information_files($package_directory);
 
-        my $pkgmap = $package->get_entries();
+        my $pkgmap  = $package->get_entries();
+        my $basedir = $package->get_parameter('BASEDIR');
         foreach my $pkgmap_entry ( @{$pkgmap} ) {
             next if ( $pkgmap_entry->is_information_file() );
-            $self->register_entry($pkgmap_entry);
+            $self->register_entry( $pkgmap_entry, $basedir );
         }
     }
 
@@ -1810,10 +1825,11 @@ use 5.010001;
     sub _unregister_package {
         my ( $self, $package ) = @_;
 
-        my $pkgmap = $package->get_entries();
+        my $pkgmap  = $package->get_entries();
+        my $basedir = $package->get_parameter('BASEDIR');
         foreach my $pkgmap_entry ( @{$pkgmap} ) {
             next if ( $pkgmap_entry->is_information_file() );
-            $self->unregister_entry($pkgmap_entry);
+            $self->unregister_entry( $pkgmap_entry, $basedir );
         }
 
         # update /var/sadm/pkg
