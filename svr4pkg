@@ -42,7 +42,7 @@ use 5.010001;
     use Fcntl ':mode';
     use POSIX qw(ceil);
     use English qw( -no_match_vars );
-    use Carp;
+    use Carp qw(croak);
 
     use overload ( 'cmp' => \&compare, );
 
