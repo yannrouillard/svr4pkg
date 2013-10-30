@@ -697,7 +697,7 @@ use 5.010001;
     use File::Temp;
     use File::Basename qw(dirname basename);
     use File::Path qw(make_path);
-    use File::Spec::Functions qw(catfile);
+    use File::Spec::Functions qw(catfile rel2abs);
     use List::Util qw(first);
     use POSIX qw(strftime);
 
@@ -747,7 +747,7 @@ use 5.010001;
     sub new {
         my ( $class, $path, $pkginst, $options ) = @_;
         my $self = {
-            path            => $path,
+            path            => rel2abs($path),
             pkginst         => $pkginst,
             pkgmap_file     => catfile( $path, $pkginst, 'pkgmap' ),
             package_entries => [],
@@ -920,7 +920,7 @@ use 5.010001;
                 # action scripts as explained in "How Classes Are Processed During Package Installation"
                 push( @{$regular_entries}, @{$failed_entries} );
 
-                $self->_install_files_by_action_script( $regular_entries, $dest, $action_script );
+                $self->_install_files_by_action_script( $class, $regular_entries, $dest, $action_script );
             } else {
                 $self->_install_files_by_copy( $regular_entries, $dest );
             }
@@ -965,7 +965,7 @@ use 5.010001;
 
             # Then we remove the regular files using the class action script if it exists
             if ( defined($action_script) ) {
-                $self->_remove_files_by_action_script( $regular_entries, $dest, $action_script );
+                $self->_remove_files_by_action_script( $class, $regular_entries, $dest, $action_script );
             } else {
                 $self->_remove_files_by_unlink( $regular_entries, $dest );
             }
@@ -1383,7 +1383,7 @@ use 5.010001;
     #                    installating the pkgmap entries
     #
     sub _install_files_by_action_script {
-        my ( $self, $pkgmap_entries, $dest, $action_script ) = @_;
+        my ( $self, $class, $pkgmap_entries, $dest, $action_script ) = @_;
 
         $action_script = $self->_relocate_path_in_script($action_script);
         my $command = $self->{trace} ? "sh -x $action_script" : $action_script;
@@ -1392,13 +1392,33 @@ use 5.010001;
         local @ENV{ keys( %{ $self->{pkginfo} } ) } = values( %{ $self->{pkginfo} } );
         open( my $fh, '|-', $command ) or croak("ERROR: can't run $action_script !");
 
+        # if the current class is stored in the PKG_CAS_PASSRELATIVE package variable
+        # it means we will pass the src path as a relative path from the
+        my $pass_relative;
+        my $pass_relative_classes = $self->get_parameter('PKG_CAS_PASSRELATIVE');
+
+        if ($pass_relative_classes) {
+            if ( first { $_ eq $class } split( /\s+/, $pass_relative_classes ) ) {
+                $pass_relative = 1;
+
+                # In passrelative mode, the first entry is the path to the directory
+                # where the package content has been extracted
+                print $fh catfile( $self->{path}, $self->{pkginst} ) . "\n";
+            }
+        }
+
         foreach my $pkgmap_entry ( @{$pkgmap_entries} ) {
 
-            # An action class script takes as input of list of files
-            # to install
-            my $src_path = $pkgmap_entry->is_regular_file() ? $self->_build_path($pkgmap_entry) : '/dev/null';
-            my $dest_path = $self->_build_path( $pkgmap_entry, $dest );
-            print $fh "$src_path $dest_path\n";
+            if ($pass_relative) {
+                my $src_path = $pkgmap_entry->{filename};
+                print $fh "$src_path\n";
+            } else {
+
+                # An action class script takes as input of list of files to install
+                my $src_path = $pkgmap_entry->is_regular_file() ? $self->_build_path($pkgmap_entry) : '/dev/null';
+                my $dest_path = $self->_build_path( $pkgmap_entry, $dest );
+                print $fh "$src_path $dest_path\n";
+            }
         }
         my $result = eval { close($fh); };
     }
@@ -1415,7 +1435,7 @@ use 5.010001;
     #                    installating the pkgmap entries
     #
     sub _remove_files_by_action_script {
-        my ( $self, $pkgmap_entries, $dest, $action_script ) = @_;
+        my ( $self, $class, $pkgmap_entries, $dest, $action_script ) = @_;
 
         $action_script = $self->_relocate_path_in_script($action_script);
         my $command = $self->{trace} ? "sh -x $action_script" : $action_script;
