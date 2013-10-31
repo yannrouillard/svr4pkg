@@ -727,6 +727,7 @@ use 5.010001;
     );
 
     use constant RESTRICTED_MASK        => oct('077');
+    use constant SANE_MASK              => oct('022');
     use constant EXECUTABLE_PERMISSIONS => oct('755');
 
     ## Public methods
@@ -1391,6 +1392,11 @@ use 5.010001;
     sub _install_files_by_action_script {
         my ( $self, $class, $pkgmap_entries, $dest, $action_script ) = @_;
 
+        # The script has to make sure the file are created with the appropriate
+        # permissions depending on the security requirements but we make sure
+        # a sane default mask is used at least in the worst case
+        my $original_umask = umask(SANE_MASK);
+
         $action_script = $self->_relocate_path_in_script($action_script);
         my $command = $self->{trace} ? "sh -x $action_script" : $action_script;
         $command .= ' ENDOFCLASS';
@@ -1426,6 +1432,10 @@ use 5.010001;
                 print $fh "$src_path $dest_path\n";
             }
         }
+
+        # we restore the previous umask;
+        umask($original_umask);
+
         my $result = eval { close($fh); };
     }
 
