@@ -854,21 +854,22 @@ use 5.010001;
     #
     # Parameters:
     #   $script             - the name of the script to check for
-    #   $alternate_location - an alternate path where scripts must be
-    #                         searched if they are not provided in
-    #                         the package
+    #   $alternate_location - an alternate list of paths where scripts must be
+    #                         searched if they are not provided in the package
     #
     sub check_installation_script {
-        my ( $self, $script, $alternate_location ) = @_;
+        my ( $self, $script, $alternate_locations ) = @_;
 
         if ( exists( $self->{installation_scripts}{$script} ) ) {
             my $pkgmap_entry = $self->{installation_scripts}{$script};
             return ( $self->_build_path($pkgmap_entry) );
         }
 
-        if ( defined($alternate_location) ) {
-            my $filename = "$alternate_location/$script";
-            return ($filename) if ( -f $filename );
+        if ( defined($alternate_locations) ) {
+            foreach my $location ( @{$alternate_locations} ) {
+                my $filename = "$location/$script";
+                return ($filename) if ( -f $filename );
+            }
         }
 
         return;
@@ -897,11 +898,11 @@ use 5.010001;
     #             class action scripts if required.
     # Parameters:
     #   $dest                    - the root directory where files must be installed
-    #   $action_scripts_location - an optional directory where class action scripts
+    #   $action_scripts_location - an optional directory list where class action scripts
     #                              must be looked for.
     #
     sub install_files {
-        my ( $self, $dest, $action_scripts_location ) = @_;
+        my ( $self, $dest, $action_scripts_locations ) = @_;
 
         my @classes = split( /\s+/, $self->get_parameter('CLASSES') );
 
@@ -915,7 +916,7 @@ use 5.010001;
 
             my ( $special_entries, $regular_entries, $hardlink_entries ) = $self->_get_class_entries($class);
 
-            my $action_script = $self->check_installation_script( "i.$class", $action_scripts_location );
+            my $action_script = $self->check_installation_script( "i.$class", $action_scripts_locations );
 
             # We first create symbolic links, devices, named pipes, and directories.
             my $failed_entries = $self->_install_files_by_copy( $special_entries, $dest );
@@ -950,7 +951,7 @@ use 5.010001;
     #                              must be looked for.
     #
     sub remove_files {
-        my ( $self, $dest, $action_scripts_location ) = @_;
+        my ( $self, $dest, $action_scripts_locations ) = @_;
 
         my @classes = split( /\s+/, $self->get_parameter('CLASSES') );
 
@@ -965,7 +966,7 @@ use 5.010001;
 
             my ( $special_entries, $regular_entries, $hardlink_entries ) = $self->_get_class_entries($class);
 
-            my $action_script = $self->check_installation_script( "r.$class", $action_scripts_location );
+            my $action_script = $self->check_installation_script( "r.$class", $action_scripts_locations );
 
             # We first remove the hardlinks
             $self->_remove_files_by_unlink( $hardlink_entries, $dest );
@@ -1758,8 +1759,9 @@ use 5.010001;
         $package->execute_procedure_script('preinstall');
 
         $self->_verbose('## Installing package files');
-        my $action_scripts_location = catfile( $self->{root_path}, $self->{action_scripts_location} );
-        $package->install_files( $dest, $action_scripts_location );
+        my $action_scripts_locations =
+          [ catfile( $self->{root_path}, $self->{action_scripts_location} ), NATIVE_ACTION_SCRIPTS_LOCATION ];
+        $package->install_files( $dest, $action_scripts_locations );
 
         $self->_verbose('## Executing postinstall script');
         $package->execute_procedure_script('postinstall');
@@ -1802,8 +1804,9 @@ use 5.010001;
         $package->execute_procedure_script('preremove');
 
         $self->_verbose('## Removing package files');
-        my $action_scripts_location = catfile( $self->{root_path}, $self->{action_scripts_location} );
-        $package->remove_files( $dest, $action_scripts_location );
+        my $action_scripts_locations =
+          [ catfile( $self->{root_path}, $self->{action_scripts_location} ), NATIVE_ACTION_SCRIPTS_LOCATION ];
+        $package->remove_files( $dest, $action_scripts_locations );
 
         $self->_verbose('## Executing postremove script');
         $package->execute_procedure_script('postremove');
