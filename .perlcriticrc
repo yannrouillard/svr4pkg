@@ -10,7 +10,7 @@ lines = 40
 minimum_regex_length_to_complain_about = 40
 
 [ValuesAndExpressions::ProhibitMagicNumbers]
-allowed_values = 0 1 2 8 256
+allowed_values = -1 0 1 2 8 256
 
 # We allow $} to workaround false positive in regex
 [Variables::ProhibitPunctuationVars]

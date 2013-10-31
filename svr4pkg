@@ -350,12 +350,12 @@ use 5.010001;
         my ( $self, $path ) = @_;
 
         if ( defined( $self->{owner} ) and defined( $self->{group} ) ) {
-            my $uid = getpwnam( $self->{owner} );
-            my $gid = getgrnam( $self->{group} );
+            my $uid = $self->{owner} ne '?' ? getpwnam( $self->{owner} ) : -1;
+            my $gid = $self->{group} ne '?' ? getgrnam( $self->{group} ) : -1;
             chown( $uid, $gid, $path ) or croak("ERROR: can't set owner/group of file $path !");
         }
 
-        if ( defined( $self->{mode} ) ) {
+        if ( defined( $self->{mode} ) and $self->{mode} ne '?' ) {
             chmod( oct( $self->{mode} ), $path ) or croak("ERROR: can't set permissions of file $path !");
         }
 
@@ -394,6 +394,12 @@ use 5.010001;
                 # A pkgmap entry of file type e, f, v or l just look like
                 # a regular file on the filesystem so we must consider that it's ok
                 next;
+            }
+
+            # A 'question mark' in owner, group or mode means we don't care about
+            # the actual value so we skip the comparison
+            if ( first { $_ eq $field } qw(owner group mode) ) {
+                next if ( $self->{$field} eq '?' or $pkgmap_entry->{$field} eq '?' );
             }
 
             if ( $self->{$field} ne $pkgmap_entry->{$field} ) {
