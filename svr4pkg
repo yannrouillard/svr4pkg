@@ -1892,6 +1892,10 @@ use 5.010001;
         my @conflicts;
 
         foreach my $pkgmap_entry ( @{ $package->get_entries() } ) {
+
+            # Directories can be shared between several packages so we don't care
+            next if ( $pkgmap_entry->is_directory() );
+
             next if ( $self->{package_entry_database}->has_entry( $pkgmap_entry, 1 ) );
 
             if ( $self->{package_entry_database}->has_entry( $pkgmap_entry, 0 )
