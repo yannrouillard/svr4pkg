@@ -107,7 +107,7 @@ use 5.010001;
     );
 
     use constant BLOCK_SIZE             => 512;
-    use constant EXECUTABLE_PERMISSIONS => oct(111);
+    use constant EXECUTABLE_PERMISSIONS => oct('111');
 
     ## Public methods
 
@@ -720,8 +720,8 @@ use 5.010001;
         { 'name' => 'blocks',            'display' => 'blocks used (approx)' },
     );
 
-    use constant RESTRICTED_MASK        => oct(700);
-    use constant EXECUTABLE_PERMISSIONS => oct(755);
+    use constant RESTRICTED_MASK        => oct('077');
+    use constant EXECUTABLE_PERMISSIONS => oct('755');
 
     ## Public methods
 
