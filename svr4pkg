@@ -436,6 +436,7 @@ use 5.010001;
     use File::Path qw(make_path);
     use List::Util qw(first);
     use File::Spec::Functions qw(catfile);
+    use Carp qw(croak);
 
     #
     # Purpose:    Creates and returns a package database object
@@ -706,6 +707,7 @@ use 5.010001;
     use File::Spec::Functions qw(catfile rel2abs);
     use List::Util qw(first);
     use POSIX qw(strftime);
+    use Carp qw(croak);
 
     use Fatal qw( close copy );
 
