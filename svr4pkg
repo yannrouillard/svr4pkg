@@ -1520,6 +1520,7 @@ use 5.010001;
     use File::Spec::Functions qw(catfile);
     use File::Basename qw(dirname);
     use File::Path qw(make_path remove_tree);
+    use IPC::Cmd qw(can_run);
     use Carp qw(croak);
 
     use constant NATIVE_ACTION_SCRIPTS_LOCATION => '/usr/sadm/install/scripts/';
@@ -1643,9 +1644,16 @@ use 5.010001;
         my ( $self, $package_file ) = @_;
 
         if ( $package_file =~ m{^https?://} ) {
+
+            my $binary =
+                can_run('curl') ? 'curl --silent --location --output'
+              : can_run('wget') ? 'wget --quiet --output-document'
+              : undef
+              or croak('ERROR: can\'t locate curl or wget binary !');
+
             my $url = $package_file;
             $package_file = File::Temp->new( UNLINK => 1 );
-            system("wget --quiet '$url' -O '$package_file'");
+            system("$binary '$package_file' '$url'");
         }
 
         make_path( $self->{spool_directory} );
