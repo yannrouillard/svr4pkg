@@ -1199,7 +1199,7 @@ use 5.010001;
         if ( -r $depend_file ) {
             open( my $fh, '<', $depend_file ) or croak("ERROR: can't open $depend_file !");
             while ( my $line = <$fh> ) {
-                my ( $type, $pkginst, $name ) = ( $line =~ /([PIR]) (\S+) (.*)/ );
+                my ( $type, $pkginst, $name ) = ( $line =~ /^\s*([PIR])\s+(\S+)\s+(.*)/ );
                 next if not( defined($type) );
                 push( @{ $self->{dependencies}{$type} }, $pkginst );
             }
