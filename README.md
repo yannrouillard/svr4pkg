@@ -70,7 +70,7 @@ Just the follow the steps below:
     script alone using the following commands:
 
         mkdir -p /opt/csw/bin
-        curl -L -o /opt/csw/bin/svr4pkg http://goo.gl/WaidPy
+        curl -L -o /opt/csw/bin/svr4pkg https://github.com/yannrouillard/svr4pkg/releases/download/v0.4/svr4pkg
         chmod +x /opt/csw/bin/svr4pkg
 
 *   Then use the script itself to install the real svr4pkg package.
@@ -78,7 +78,7 @@ Just the follow the steps below:
     pkgrm, pkginfo...) that are required to be used as a drop-in 
     replacement and to work with pkgutil.
    
-        /opt/csw/bin/svr4pkg add -n -d http://goo.gl/8zURSM
+        /opt/csw/bin/svr4pkg add -n -d https://github.com/yannrouillard/svr4pkg/releases/download/v0.4/svr4pkg.pkg
 
 *   You can then the follow the standard opencsw manual to install
     the opencsw distribution:
