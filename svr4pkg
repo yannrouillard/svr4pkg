@@ -2171,6 +2171,10 @@ sub chk_cmd {
 
     foreach my $pkginst ( @{$package_names} ) {
         my $package = $package_manager->get_package( $pkginst, $package_options );
+        if ( not defined($package) ) {
+            print STDERR "ERROR: no package associated with <$pkginst>\n";
+            exit(1);
+        }
 
         foreach my $entry_error ( @{ $package->check_installed_files( $options->{root_path} ) } ) {
             my $package_entry = $entry_error->{package_entry};
