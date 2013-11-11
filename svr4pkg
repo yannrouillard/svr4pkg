@@ -543,28 +543,37 @@ use 5.010001;
     #
     # Parameters:
     #   $pkgmap_entry - a valid package entry object
-    #   $same_owner   - if true, has_entry will return true
-    #                    only if an entry with the same owner is found
-    #                   if false, has_entry will return true
-    #                    if an entry exists but without the same owners
-    #                    as the given pkgmap_entry
+    #   $options - a hash contains optional arguments:
+    #
+    #     basedir     - an optional basedir which will be used
+    #                    to know the absolute path of relative pkgmap entries
+    #
+    #     same_owner   - if true, has_entry will return true
+    #                      only if an entry with the same owner is found
+    #                     if false, has_entry will return true
+    #                      if an entry exists but without the same owners
+    #                      as the given pkgmap_entry
     #
     sub has_entry {
-        my ( $self, $pkgmap_entry, $same_owner ) = @_;
+        my ( $self, $pkgmap_entry, $options ) = @_;
 
         my $raw_entries = $self->_get_raw_entries();
         my $index       = $self->_get_index();
         my $filename    = $pkgmap_entry->{filename};
+
+        if ( $filename !~ qr{^/} and $options->{basedir} ) {
+            $filename = catfile( $options->{basedir}, $filename );
+        }
 
         # we check if the given path is already registered in the database,
         if ( exists( $index->{by_filename}{$filename} ) and defined( ${ $index->{by_filename}{$filename} } ) ) {
             my $candidate_entry = Package::Entry->new_from_line( ${ $index->{by_filename}{$filename} }, 'contents' );
             foreach my $pkginst ( @{ $pkgmap_entry->{packages} } ) {
                 if ( not( first { $_ eq $pkginst } @{ $candidate_entry->{packages} } ) ) {
-                    return ( not $same_owner );
+                    return ( not $options->{same_owner} );
                 }
             }
-            return ($same_owner);
+            return ( $options->{same_owner} );
         }
 
         return;
@@ -1900,15 +1909,18 @@ use 5.010001;
     sub _check_file_conflict {
         my ( $self, $package, $dest ) = @_;
         my @conflicts;
+        my $basedir = $package->get_parameter('BASEDIR');
 
         foreach my $pkgmap_entry ( @{ $package->get_entries() } ) {
 
             # Directories can be shared between several packages so we don't care
             next if ( $pkgmap_entry->is_directory() );
 
-            next if ( $self->{package_entry_database}->has_entry( $pkgmap_entry, 1 ) );
+            next
+              if (
+                $self->{package_entry_database}->has_entry( $pkgmap_entry, { basedir => $basedir, same_owner => 1 } ) );
 
-            if ( $self->{package_entry_database}->has_entry( $pkgmap_entry, 0 )
+            if ( $self->{package_entry_database}->has_entry( $pkgmap_entry, { basedir => $basedir, same_owner => 0 } )
                 or -e $package->_build_path( $pkgmap_entry, $dest ) )
             {
                 push( @conflicts, $pkgmap_entry->{filename} );
