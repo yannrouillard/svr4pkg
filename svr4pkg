@@ -2021,6 +2021,7 @@ sub add_cmd {
         print STDERR ("ERROR: no package name given or no package found in $options->{device}\n");
         return;
     }
+    $pkginst //= $package->{pkginst};
 
     my ( $ret, $info ) = $package_manager->install_package($package);
 
