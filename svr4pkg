@@ -1542,6 +1542,11 @@ use 5.010001;
     use constant DEPENDENCY_ERROR => 2;
     use constant EXTRACT_ERROR    => 3;
 
+    # Force options values
+    use constant FORCE_DEPENDENCIES      => 0x1;
+    use constant FORCE_SUNW_DEPENDENCIES => 0x2;
+    use constant FORCE_CONFLICTS         => 0x4;
+
     my @relocatable_binaries = qw(pkgparam pkginfo installf removef);
 
     ## Public methods
@@ -1746,16 +1751,19 @@ use 5.010001;
         my $dest = $self->{root_path};
 
         my @missing_dependencies;
-        foreach my $dependency ( @{ $package->{dependencies}{'P'} } ) {
-            if ( not $self->is_package_installed($dependency) ) {
-                push( @missing_dependencies, $dependency );
+        if ( not( $options->{force} and $options->{force} & FORCE_DEPENDENCIES ) ) {
+            foreach my $dependency ( @{ $package->{dependencies}{'P'} } ) {
+                if ( not $self->is_package_installed($dependency) ) {
+                    next if ( $dependency =~ /^SUNW/ and $options->{force} & FORCE_SUNW_DEPENDENCIES );
+                    push( @missing_dependencies, $dependency );
+                }
+            }
+            if (@missing_dependencies) {
+                return ( DEPENDENCY_ERROR, \@missing_dependencies );
             }
         }
-        if (@missing_dependencies) {
-            return ( DEPENDENCY_ERROR, \@missing_dependencies );
-        }
 
-        if ( not( $options->{force} ) ) {
+        if ( not( $options->{force} and $options->{force} & FORCE_CONFLICTS ) ) {
             my $conflicts = $self->_check_file_conflict( $package, $dest );
             if ( @{$conflicts} ) {
                 return ( CONFLICT_ERROR, $conflicts );
@@ -1803,7 +1811,7 @@ use 5.010001;
 
         # We first check if there is some installed packages that depend
         # on this one
-        if ( not( $options->{force} ) ) {
+        if ( not( $options->{force} and $options->{force} & FORCE_DEPENDENCIES ) ) {
             my @dependent_packages;
             foreach my $pkginst ( @{ $self->list_installed_packages() } ) {
                 next if ( $pkginst eq $package->{pkginst} );
@@ -2018,6 +2026,7 @@ $commands_options_specs{'pkgadd'} = {
     'device'         => { 'spec' => 'd=s', 'default' => '/var/spool/pkg' },
     'trace'          => { 'spec' => 'v',   'default' => 0 },
     'noninteractive' => { 'spec' => 'n',   'default' => 0 },
+    'force'          => { 'spec' => 'f+',  'default' => 0 },
 };
 
 sub add_cmd {
@@ -2026,7 +2035,12 @@ sub add_cmd {
 
     my $pkginst = @arguments ? shift(@arguments) : undef;
 
-    my $package_options = { 'device' => $options->{device}, trace => $options->{trace} };
+    my $force =
+        $options->{force} == 1 ? Package::Manager::FORCE_SUNW_DEPENDENCIES
+      : $options->{force} == 2 ? Package::Manager::FORCE_DEPENDENCIES
+      :                          0;
+
+    my $package_options = { 'device' => $options->{device}, trace => $options->{trace}, force => $force };
     my $package = $package_manager->get_package( $pkginst, $package_options );
 
     if ( not defined $package ) {
@@ -2035,7 +2049,7 @@ sub add_cmd {
     }
     $pkginst //= $package->{pkginst};
 
-    my ( $ret, $info ) = $package_manager->install_package($package);
+    my ( $ret, $info ) = $package_manager->install_package( $package, $package_options );
 
     if ( $ret == Package::Manager::DEPENDENCY_ERROR ) {
         print("The following packages are not installed and are required to install $pkginst:\n");
@@ -2047,8 +2061,6 @@ sub add_cmd {
 
     if ( $ret == Package::Manager::CONFLICT_ERROR ) {
 
-        my $force;
-
         if ( not $options->{noninteractive} ) {
             print("The following files are already installed on the system:\n");
 
@@ -2058,14 +2070,16 @@ sub add_cmd {
             if ( is_interactive() ) {
                 print 'Would you like to install the package anyway (y/n) ? ';
                 my $answer = <STDIN>;
-                $force = ( $answer =~ /^[Yy]$/ );
+                if ( $answer =~ /^[Yy]$/ ) {
+                    $options->{force} |= Package::Manager::FORCE_CONFLICTS;
+                }
             }
         }
 
         # We assume yes in non interactive mode to be usable by pkgutil
         # until we add real support the admin file through the "-a admin"
-        if ( $force or $options->{noninteractive} ) {
-            ( $ret, $info ) = $package_manager->install_package( $package, { force => 1 } );
+        if ( $package_options->{force} & Package::Manager::FORCE_CONFLICTS or $options->{noninteractive} ) {
+            ( $ret, $info ) = $package_manager->install_package( $package, $package_options );
         }
     }
 
@@ -2079,6 +2093,7 @@ $commands_options_specs{'pkgrm'} = {
     'adminfile'      => { 'spec' => 'a=s', 'default' => undef },
     'trace'          => { 'spec' => 'v',   'default' => 0 },
     'noninteractive' => { 'spec' => 'n',   'default' => 0 },
+    'force'          => { 'spec' => 'f',   'default' => 0 },
 };
 
 sub rm_cmd {
@@ -2087,7 +2102,8 @@ sub rm_cmd {
 
     return if ( not @arguments );
 
-    my $package_options = { trace => $options->{trace} };
+    my $force = $options->{force} ? Package::Manager::FORCE_DEPENDENCIES : 0;
+    my $package_options = { trace => $options->{trace}, force => $force };
 
     my @packages_list;
     foreach my $pkginst (@arguments) {
@@ -2100,11 +2116,9 @@ sub rm_cmd {
     }
 
     foreach my $package (@packages_list) {
-        my ( $ret, $info ) = $package_manager->remove_package($package);
+        my ( $ret, $info ) = $package_manager->remove_package( $package, $package_options );
 
         if ( $ret == Package::Manager::DEPENDENCY_ERROR ) {
-
-            my $force;
 
             if ( not $options->{noninteractive} ) {
                 print( 'The following packages depend on ' . $package->{pkginst} . ":\n" );
@@ -2115,16 +2129,19 @@ sub rm_cmd {
                 if ( is_interactive() ) {
                     print 'Would you like to remove the package anyway (y/n) ? ';
                     my $answer = <STDIN>;
-                    $force = ( $answer =~ /^[Yy]$/ );
+                    if ( $answer =~ /^[Yy]$/ ) {
+                        $package_options->{force} |= Package::Manager::FORCE_DEPENDENCIES;
+                    }
                 }
             }
 
             # We assume yes in non interactive mode to be usable by pkgutil,
             # until we add real support the admin file through the "-a admin"
-            if ( $force or $options->{noninteractive} ) {
-                ( $ret, $info ) = $package_manager->remove_package( $package, { force => 1 } );
+            if ( $package_options->{force} & Package::Manager::FORCE_DEPENDENCIES or $options->{noninteractive} ) {
+                ( $ret, $info ) = $package_manager->remove_package( $package, $package_options );
             }
         }
+
         if ( $ret != Package::Manager::SUCCESS ) {
             return;
         }
@@ -2363,7 +2380,7 @@ svr4pkg [command] [option]... [package]...
 
 Svr4pkg is a tool to emulate the basic behaviour of the set of solaris tools used to manipulate
 svr4 packages (pkgadd, pkgrm, pkginfo...).
-It aimed at being used on illumos-based operating systems that do not provide the legacy
+It aimed at being used on solaris based operating systems that do not provide the legacy
 svr4 package tools, so that it's easy to install svr4 packages on these systems.
 
 =head1 WARNING
@@ -2374,7 +2391,7 @@ with the package database if you use both tools on the same system.
 
 =head1 OPTIONS
 
-The following options are implemented:
+The following native options are implemented:
 
  - common options: -R
  - pkagadd:        -d, -v
@@ -2384,9 +2401,24 @@ The following options are implemented:
  - installf:       -c
  - removef:
 
- Please refer to the man page of the original Solaris tools to know more about the
- various options.
+ Please refer to the man page of the original Solaris tools to know more about these
+ options.
 
+The following original options are available:
+
+ - pkgadd
+
+   -f 
+       Force the installation of the package even if some dependencies are not installed.
+       This option is additive:
+        "-f" will only not force the installation if SUNW dependencies are not installed,
+        "-f -f" will force the installation whatever the number of dependencies not installed.
+
+ - pkgrm
+
+   -f 
+       Force the removal of the package even if some packages depend on it.
+       
 =back
 
 =head1 AUTHOR
