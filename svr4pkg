@@ -2071,14 +2071,17 @@ sub add_cmd {
                 print 'Would you like to install the package anyway (y/n) ? ';
                 my $answer = <STDIN>;
                 if ( $answer =~ /^[Yy]$/ ) {
-                    $options->{force} |= Package::Manager::FORCE_CONFLICTS;
+                    $package_options->{force} |= Package::Manager::FORCE_CONFLICTS;
                 }
             }
+        } else {
+
+            # We assume yes in non interactive mode to be usable by pkgutil
+            # until we add real support the admin file through the "-a admin"
+            $package_options->{force} |= Package::Manager::FORCE_CONFLICTS;
         }
 
-        # We assume yes in non interactive mode to be usable by pkgutil
-        # until we add real support the admin file through the "-a admin"
-        if ( $package_options->{force} & Package::Manager::FORCE_CONFLICTS or $options->{noninteractive} ) {
+        if ( $package_options->{force} & Package::Manager::FORCE_CONFLICTS ) {
             ( $ret, $info ) = $package_manager->install_package( $package, $package_options );
         }
     }
@@ -2133,11 +2136,14 @@ sub rm_cmd {
                         $package_options->{force} |= Package::Manager::FORCE_DEPENDENCIES;
                     }
                 }
+            } else {
+
+                # We assume yes in non interactive mode to be usable by pkgutil,
+                # until we add real support the admin file through the "-a admin"
+                $package_options->{force} |= Package::Manager::FORCE_DEPENDENCIES;
             }
 
-            # We assume yes in non interactive mode to be usable by pkgutil,
-            # until we add real support the admin file through the "-a admin"
-            if ( $package_options->{force} & Package::Manager::FORCE_DEPENDENCIES or $options->{noninteractive} ) {
+            if ( $package_options->{force} & Package::Manager::FORCE_DEPENDENCIES ) {
                 ( $ret, $info ) = $package_manager->remove_package( $package, $package_options );
             }
         }
